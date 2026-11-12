@@ -1,0 +1,2 @@
+MongoDB version: 7.0.45
+Redis server v=7.4.12 sha=00000000:0 malloc=jemalloc-5.3.0 bits=64 build=97c9b7ac751c8f00

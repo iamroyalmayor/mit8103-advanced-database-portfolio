@@ -1,0 +1,96 @@
+customers   : 5000
+accounts    : 8001
+transactions: 157973
+statements  : 96721 (account-month buckets)
+sum of all balances (must be 0): Decimal128('0.00')
+
+Sample customer document (embedded KYC, devices, beneficiaries):
+{
+  _id: 'CUS-000002',
+  bvn: '22300000002',
+  name: {
+    first: 'Emeka',
+    last: 'Nwosu'
+  },
+  phone: '+2348100000002',
+  email: 'cust2@mail.example.ng',
+  kyc: {
+    tier: 1,
+    verified: false,
+    documents: [
+      {
+        type: 'NIN',
+        number: '10000000002'
+      }
+    ]
+  },
+  address: {
+    state: 'Kano',
+    city: '—'
+  },
+  devices: [
+    {
+      id: 'dev-2',
+      os: 'iOS',
+      lastSeen: ISODate('2026-10-19T20:55:36.313Z')
+    }
+  ],
+  beneficiaries: [],
+  createdAt: ISODate('2025-05-10T09:34:57.827Z'),
+  business: {
+    rcNumber: 'RC100002',
+    sector: 'Tech'
+  }
+}
+
+Sample transaction document (embedded legs + flexible meta):
+{
+  _id: 'TRF-0000005',
+  type: 'TRANSFER',
+  status: 'COMPLETED',
+  amount: Decimal128('8853.40'),
+  channel: 'POS',
+  legs: [
+    {
+      account: '4000006387',
+      dir: 'D',
+      amount: Decimal128('8853.40')
+    },
+    {
+      account: '4000006645',
+      dir: 'C',
+      amount: Decimal128('8853.40')
+    }
+  ],
+  createdAt: ISODate('2026-09-19T15:58:49.851Z'),
+  meta: {
+    device: 'dev-6387',
+    terminal: 'POS-871'
+  }
+}
+
+Sample statement bucket (first 3 entries shown):
+{
+  _id: '4000000001:2025-11',
+  entries: [
+    {
+      txn: 'DEP-4000000001',
+      at: ISODate('2025-11-06T22:41:20.161Z'),
+      dir: 'C',
+      amount: Decimal128('500000.00'),
+      channel: 'BRANCH'
+    },
+    {
+      txn: 'TRF-0117806',
+      at: ISODate('2025-11-22T23:22:17.700Z'),
+      dir: 'D',
+      amount: Decimal128('8158.61'),
+      channel: 'MOBILE'
+    }
+  ],
+  credits: Decimal128('500000.00'),
+  debits: Decimal128('8158.61'),
+  count: 2,
+  account: '4000000001',
+  month: '2025-11'
+}

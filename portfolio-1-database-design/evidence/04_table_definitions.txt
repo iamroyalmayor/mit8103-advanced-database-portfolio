@@ -1,0 +1,82 @@
+                                                               Table "nairaflow.account"
+     Column     |           Type           | Collation | Nullable |           Default            | Storage  | Compression | Stats target | Description 
+----------------+--------------------------+-----------+----------+------------------------------+----------+-------------+--------------+-------------
+ account_id     | bigint                   |           | not null | generated always as identity | plain    |             |              | 
+ account_number | character(10)            |           | not null |                              | extended |             |              | 
+ customer_id    | bigint                   |           | not null |                              | plain    |             |              | 
+ type_code      | character varying(10)    |           | not null |                              | extended |             |              | 
+ currency       | character(3)             |           | not null | 'NGN'::bpchar                | extended |             |              | 
+ balance        | numeric(18,2)            |           | not null | 0                            | main     |             |              | 
+ status         | character varying(10)    |           | not null | 'ACTIVE'::character varying  | extended |             |              | 
+ opened_at      | timestamp with time zone |           | not null | now()                        | plain    |             |              | 
+Indexes:
+    "account_pkey" PRIMARY KEY, btree (account_id)
+    "account_account_number_key" UNIQUE CONSTRAINT, btree (account_number)
+    "ix_account_customer" btree (customer_id)
+Check constraints:
+    "account_account_number_check" CHECK (account_number ~ '^[0-9]{10}$'::text)
+    "account_currency_check" CHECK (currency = ANY (ARRAY['NGN'::bpchar, 'USD'::bpchar]))
+    "account_status_check" CHECK (status::text = ANY (ARRAY['ACTIVE'::character varying, 'FROZEN'::character varying, 'CLOSED'::character varying]::text[]))
+    "chk_no_overdraft" CHECK (balance >= 0::numeric OR type_code::text = 'GL'::text)
+Foreign-key constraints:
+    "account_customer_id_fkey" FOREIGN KEY (customer_id) REFERENCES nairaflow.customer(customer_id) ON DELETE RESTRICT
+    "account_type_code_fkey" FOREIGN KEY (type_code) REFERENCES nairaflow.account_type(type_code)
+Referenced by:
+    TABLE "nairaflow.beneficiary" CONSTRAINT "beneficiary_account_id_fkey" FOREIGN KEY (account_id) REFERENCES nairaflow.account(account_id) ON DELETE CASCADE
+    TABLE "nairaflow.ledger_entry" CONSTRAINT "ledger_entry_account_id_fkey" FOREIGN KEY (account_id) REFERENCES nairaflow.account(account_id)
+Triggers:
+    audit_account_status AFTER UPDATE OF status ON nairaflow.account FOR EACH ROW WHEN (old.status::text IS DISTINCT FROM new.status::text) EXECUTE FUNCTION nairaflow.trg_audit('account_id')
+Access method: heap
+
+                                 Table "nairaflow.ledger_entry"
+    Column     |           Type           | Collation | Nullable |           Default            
+---------------+--------------------------+-----------+----------+------------------------------
+ entry_id      | bigint                   |           | not null | generated always as identity
+ txn_id        | bigint                   |           | not null | 
+ account_id    | bigint                   |           | not null | 
+ direction     | character(1)             |           | not null | 
+ amount        | numeric(18,2)            |           | not null | 
+ balance_after | numeric(18,2)            |           | not null | 
+ created_at    | timestamp with time zone |           | not null | now()
+Indexes:
+    "ledger_entry_pkey" PRIMARY KEY, btree (entry_id)
+    "ix_ledger_txn" btree (txn_id)
+    "uq_leg" UNIQUE CONSTRAINT, btree (txn_id, account_id, direction)
+Check constraints:
+    "ledger_entry_amount_check" CHECK (amount > 0::numeric)
+    "ledger_entry_direction_check" CHECK (direction = ANY (ARRAY['D'::bpchar, 'C'::bpchar]))
+Foreign-key constraints:
+    "ledger_entry_account_id_fkey" FOREIGN KEY (account_id) REFERENCES nairaflow.account(account_id)
+    "ledger_entry_txn_id_fkey" FOREIGN KEY (txn_id) REFERENCES nairaflow.txn(txn_id)
+Triggers:
+    ledger_balanced AFTER INSERT ON nairaflow.ledger_entry DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION nairaflow.trg_check_balanced_txn()
+
+                                      Table "nairaflow.txn"
+     Column      |           Type           | Collation | Nullable |           Default            
+-----------------+--------------------------+-----------+----------+------------------------------
+ txn_id          | bigint                   |           | not null | generated always as identity
+ reference       | uuid                     |           | not null | gen_random_uuid()
+ txn_type        | character varying(12)    |           | not null | 
+ status          | character varying(10)    |           | not null | 'PENDING'::character varying
+ amount          | numeric(18,2)            |           | not null | 
+ channel         | character varying(6)     |           | not null | 
+ narration       | character varying(140)   |           |          | 
+ reverses_txn_id | bigint                   |           |          | 
+ created_at      | timestamp with time zone |           | not null | now()
+ completed_at    | timestamp with time zone |           |          | 
+Indexes:
+    "txn_pkey" PRIMARY KEY, btree (txn_id)
+    "txn_reference_key" UNIQUE CONSTRAINT, btree (reference)
+Check constraints:
+    "chk_completed_time" CHECK (completed_at IS NULL OR completed_at >= created_at)
+    "chk_reversal_link" CHECK ((txn_type::text = 'REVERSAL'::text) = (reverses_txn_id IS NOT NULL))
+    "txn_amount_check" CHECK (amount > 0::numeric)
+    "txn_channel_check" CHECK (channel::text = ANY (ARRAY['MOBILE'::character varying, 'USSD'::character varying, 'WEB'::character varying, 'POS'::character varying, 'ATM'::character varying, 'BRANCH'::character varying]::text[]))
+    "txn_status_check" CHECK (status::text = ANY (ARRAY['PENDING'::character varying, 'COMPLETED'::character varying, 'FAILED'::character varying, 'REVERSED'::character varying]::text[]))
+    "txn_txn_type_check" CHECK (txn_type::text = ANY (ARRAY['DEPOSIT'::character varying, 'WITHDRAWAL'::character varying, 'TRANSFER'::character varying, 'REVERSAL'::character varying, 'FEE'::character varying]::text[]))
+Foreign-key constraints:
+    "txn_reverses_txn_id_fkey" FOREIGN KEY (reverses_txn_id) REFERENCES nairaflow.txn(txn_id)
+Referenced by:
+    TABLE "nairaflow.ledger_entry" CONSTRAINT "ledger_entry_txn_id_fkey" FOREIGN KEY (txn_id) REFERENCES nairaflow.txn(txn_id)
+    TABLE "nairaflow.txn" CONSTRAINT "txn_reverses_txn_id_fkey" FOREIGN KEY (reverses_txn_id) REFERENCES nairaflow.txn(txn_id)
+

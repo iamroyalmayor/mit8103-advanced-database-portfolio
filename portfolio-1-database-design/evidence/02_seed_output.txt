@@ -1,0 +1,114 @@
+SET search_path TO nairaflow;
+SET
+INSERT INTO state(state_code, state_name, geo_zone) VALUES
+ ('LA','Lagos','South West'),        ('OY','Oyo','South West'),
+ ('OG','Ogun','South West'),         ('FC','FCT Abuja','North Central'),
+ ('KN','Kano','North West'),         ('KD','Kaduna','North West'),
+ ('RI','Rivers','South South'),      ('ED','Edo','South South'),
+ ('EN','Enugu','South East'),        ('AN','Anambra','South East'),
+ ('BO','Borno','North East'),        ('PL','Plateau','North Central');
+INSERT 0 12
+INSERT INTO account_type(type_code, description, daily_limit, interest_rate, is_internal) VALUES
+ ('SAVINGS', 'Tier savings account',          5000000.00, 4.50, FALSE),
+ ('CURRENT', 'Business current account',     50000000.00, 0.00, FALSE),
+ ('GL',      'Internal general-ledger account', 999999999999.00, 0.00, TRUE);
+INSERT 0 3
+INSERT INTO customer(bvn, first_name, last_name, email, phone, date_of_birth, kyc_tier, state_code) VALUES
+ ('00000000000','NairaFlow','Treasury','treasury@nairaflow.ng','+2340000000000','1990-01-01',3,'LA'),
+ ('22145678901','Adaeze','Okafor','adaeze.okafor@example.ng','+2348031234501','1991-04-12',3,'LA'),
+ ('22145678902','Babatunde','Adeyemi','tunde.adeyemi@example.ng','+2348031234502','1985-09-30',2,'OY'),
+ ('22145678903','Chinedu','Eze','chinedu.eze@example.ng','+2348031234503','1994-01-18',2,'EN'),
+ ('22145678904','Fatima','Bello','fatima.bello@example.ng','+2348031234504','1998-07-07',1,'KN'),
+ ('22145678905','Emeka','Nwosu','emeka.nwosu@example.ng','+2348031234505','1979-11-02',3,'AN'),
+ ('22145678906','Halima','Yusuf','halima.yusuf@example.ng','+2348031234506','1990-03-25',2,'KD'),
+ ('22145678907','Oluwaseun','Balogun','seun.balogun@example.ng','+2348031234507','1987-12-14',3,'OG'),
+ ('22145678908','Ibrahim','Musa','ibrahim.musa@example.ng','+2348031234508','2000-05-09',1,'FC'),
+ ('22145678909','Ngozi','Obi','ngozi.obi@example.ng','+2348031234509','1983-08-21',2,'RI'),
+ ('22145678910','Osagie','Igbinedion','osagie.i@example.ng','+2348031234510','1992-02-28',2,'ED');
+INSERT 0 11
+INSERT INTO account(account_number, customer_id, type_code, balance) VALUES
+ ('9000000001', 1, 'GL', 0),        -- cash / settlement GL
+ ('9000000002', 1, 'GL', 0),        -- fee income GL
+ ('0123456781', 2, 'SAVINGS', 0), ('0123456782', 2, 'CURRENT', 0),
+ ('0123456783', 3, 'SAVINGS', 0), ('0123456784', 4, 'SAVINGS', 0),
+ ('0123456785', 5, 'SAVINGS', 0), ('0123456786', 6, 'CURRENT', 0),
+ ('0123456787', 7, 'SAVINGS', 0), ('0123456788', 8, 'SAVINGS', 0),
+ ('0123456789', 9, 'SAVINGS', 0), ('0123456790', 10,'SAVINGS', 0),
+ ('0123456791', 11,'CURRENT', 0);
+INSERT 0 13
+INSERT INTO staff(full_name, role, email) VALUES
+ ('Kemi Adebayo','TELLER','kemi.adebayo@nairaflow.ng'),
+ ('Yakubu Danjuma','AUDITOR','yakubu.danjuma@nairaflow.ng'),
+ ('Grace Etim','SUPPORT','grace.etim@nairaflow.ng');
+INSERT 0 3
+SELECT transfer_funds('9000000001', account_number, amt, 'BRANCH', 'Opening deposit',
+                      gen_random_uuid(), 'DEPOSIT')
+  FROM (VALUES ('0123456781',  850000.00), ('0123456782', 4200000.00),
+               ('0123456783',  320000.00), ('0123456784',   45000.00),
+               ('0123456785', 1250000.00), ('0123456786', 9800000.00),
+               ('0123456787',  610000.00), ('0123456788',   18500.00),
+               ('0123456789',  275000.00), ('0123456790', 2300000.00)) v(account_number, amt);
+ transfer_funds 
+----------------
+              1
+              2
+              3
+              4
+              5
+              6
+              7
+              8
+              9
+             10
+(10 rows)
+
+SELECT transfer_funds('0123456781','0123456783', 25000.00, 'MOBILE','Rent contribution');
+ transfer_funds 
+----------------
+             11
+(1 row)
+
+SELECT transfer_funds('0123456786','0123456785',150000.00, 'WEB',   'Supplier payment');
+ transfer_funds 
+----------------
+             12
+(1 row)
+
+SELECT transfer_funds('0123456783','0123456784',  5000.00, 'USSD',  'Airtime refund');
+ transfer_funds 
+----------------
+             13
+(1 row)
+
+SELECT transfer_funds('0123456790','0123456787', 72000.00, 'MOBILE','School fees');
+ transfer_funds 
+----------------
+             14
+(1 row)
+
+SELECT transfer_funds('0123456782','0123456786',500000.00, 'WEB',   'Invoice INV-2209');
+ transfer_funds 
+----------------
+             15
+(1 row)
+
+SELECT transfer_funds('0123456785','9000000001', 40000.00, 'ATM',   'ATM cash',  gen_random_uuid(), 'WITHDRAWAL');
+ transfer_funds 
+----------------
+             16
+(1 row)
+
+SELECT transfer_funds('0123456785','9000000002',    35.00, 'ATM',   'ATM fee',   gen_random_uuid(), 'FEE');
+ transfer_funds 
+----------------
+             17
+(1 row)
+
+INSERT INTO beneficiary(customer_id, account_id, nickname)
+SELECT 2, account_id, 'Tunde' FROM account WHERE account_number = '0123456783'
+UNION ALL
+SELECT 6, account_id, 'Fatima - supplier' FROM account WHERE account_number = '0123456785';
+INSERT 0 2
+INSERT INTO txn(txn_type, status, amount, channel, narration)
+VALUES ('TRANSFER','FAILED', 12000.00, 'POS', 'NIBSS timeout');
+INSERT 0 1

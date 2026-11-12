@@ -1,0 +1,77 @@
+===================================================================
+S5 DEADLOCK: opposite-direction transfers lock rows in opposite order
+===================================================================
+------------------------- Session A -------------------------------
+[A] SET search_path TO nairaflow;
+[A] SET
+[A] BEGIN;
+[A] BEGIN
+[A] SELECT ts('A: lock 0123456781');
+[A]                 ts                
+[A] ----------------------------------
+[A]  22:59:33.796  A: lock 0123456781
+[A] (1 row)
+[A] 
+[A] UPDATE account SET balance = balance - 100 WHERE account_number = '0123456781';
+[A] UPDATE 1
+[A] SELECT ts('A: waiting 3s'), pg_sleep(3);
+[A]              ts              | pg_sleep 
+[A] -----------------------------+----------
+[A]  22:59:33.800  A: waiting 3s | 
+[A] (1 row)
+[A] 
+[A] SELECT ts('A: lock 0123456783');
+[A]                 ts                
+[A] ----------------------------------
+[A]  22:59:36.803  A: lock 0123456783
+[A] (1 row)
+[A] 
+[A] UPDATE account SET balance = balance + 100 WHERE account_number = '0123456783';
+[A] psql:/tmp/s5_deadlock_A.sql:8: ERROR:  deadlock detected
+[A] DETAIL:  Process 561 waits for ShareLock on transaction 908; blocked by process 570.
+[A] Process 570 waits for ShareLock on transaction 907; blocked by process 561.
+[A] HINT:  See server log for query details.
+[A] CONTEXT:  while updating tuple (0,60) in relation "account"
+[A] COMMIT;
+[A] ROLLBACK
+[A] SELECT ts('A: end');
+[A]           ts          
+[A] ----------------------
+[A]  22:59:37.806  A: end
+[A] (1 row)
+[A] 
+------------------------- Session B -------------------------------
+[B] SET search_path TO nairaflow;
+[B] SET
+[B] BEGIN;
+[B] BEGIN
+[B] SELECT ts('B: lock 0123456783');
+[B]                 ts                
+[B] ----------------------------------
+[B]  22:59:34.692  B: lock 0123456783
+[B] (1 row)
+[B] 
+[B] UPDATE account SET balance = balance - 100 WHERE account_number = '0123456783';
+[B] UPDATE 1
+[B] SELECT ts('B: waiting 1s'), pg_sleep(1);
+[B]              ts              | pg_sleep 
+[B] -----------------------------+----------
+[B]  22:59:34.694  B: waiting 1s | 
+[B] (1 row)
+[B] 
+[B] SELECT ts('B: lock 0123456781');
+[B]                 ts                
+[B] ----------------------------------
+[B]  22:59:35.696  B: lock 0123456781
+[B] (1 row)
+[B] 
+[B] UPDATE account SET balance = balance + 100 WHERE account_number = '0123456781';
+[B] UPDATE 1
+[B] COMMIT;
+[B] COMMIT
+[B] SELECT ts('B: end');
+[B]           ts          
+[B] ----------------------
+[B]  22:59:37.809  B: end
+[B] (1 row)
+[B] 

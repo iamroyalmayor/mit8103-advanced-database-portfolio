@@ -1,0 +1,376 @@
+SET search_path TO nairaflow;
+SET
+SET jit = off;
+SET
+SELECT count(*) AS warm_ledger FROM ledger_entry;
+ warm_ledger 
+-------------
+     2100668
+
+SELECT count(*) AS warm_txn    FROM txn;
+ warm_txn 
+----------
+  1100379
+
+### Q1 Account statement: last 90 days for one account (mobile app "History" screen)
+SELECT l.created_at::timestamp(0) AS posted, t.txn_type, t.channel, l.direction, l.amount, l.balance_after
+  FROM ledger_entry l
+  JOIN txn t     ON t.txn_id = l.txn_id
+  JOIN account a ON a.account_id = l.account_id
+ WHERE a.account_number = '3000012345'
+   AND l.created_at >= now() - INTERVAL '90 days'
+ ORDER BY l.created_at DESC
+ LIMIT 10;
+       posted        | txn_type | channel | direction | amount  | balance_after 
+---------------------+----------+---------+-----------+---------+---------------
+ 2026-11-02 23:33:16 | TRANSFER | WEB     | D         | 9825.84 |     419041.34
+ 2026-10-19 18:49:54 | TRANSFER | MOBILE  | C         | 9404.43 |     428867.18
+ 2026-09-21 16:45:55 | TRANSFER | USSD    | D         | 8700.08 |     419462.75
+ 2026-08-14 17:31:57 | TRANSFER | MOBILE  | D         | 4104.87 |     428162.83
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT l.created_at, t.txn_type, t.channel, l.direction, l.amount, l.balance_after
+  FROM ledger_entry l
+  JOIN txn t     ON t.txn_id = l.txn_id
+  JOIN account a ON a.account_id = l.account_id
+ WHERE a.account_number = '3000012345'
+   AND l.created_at >= now() - INTERVAL '90 days'
+ ORDER BY l.created_at DESC;
+                                                                             QUERY PLAN                                                                             
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Gather Merge  (cost=38383.07..38383.54 rows=4 width=38) (actual time=321.217..333.550 rows=4 loops=1)
+   Workers Planned: 2
+   Workers Launched: 2
+   Buffers: shared hit=21686
+   ->  Sort  (cost=37383.05..37383.06 rows=2 width=38) (actual time=317.100..317.104 rows=1 loops=3)
+         Sort Key: l.created_at DESC
+         Sort Method: quicksort  Memory: 25kB
+         Buffers: shared hit=21686
+         Worker 0:  Sort Method: quicksort  Memory: 25kB
+         Worker 1:  Sort Method: quicksort  Memory: 25kB
+         ->  Nested Loop  (cost=8.88..37383.04 rows=2 width=38) (actual time=226.037..317.061 rows=1 loops=3)
+               Buffers: shared hit=21670
+               ->  Hash Join  (cost=8.45..37381.82 rows=2 width=33) (actual time=226.009..317.014 rows=1 loops=3)
+                     Hash Cond: (l.account_id = a.account_id)
+                     Buffers: shared hit=21653
+                     ->  Parallel Seq Scan on ledger_entry l  (cost=0.00..36860.37 rows=195420 width=41) (actual time=7.657..293.843 rows=156589 loops=3)
+                           Filter: (created_at >= (now() - '90 days'::interval))
+                           Rows Removed by Filter: 543634
+                           Buffers: shared hit=21543
+                     ->  Hash  (cost=8.44..8.44 rows=1 width=8) (actual time=0.059..0.060 rows=1 loops=3)
+                           Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                           Buffers: shared hit=14
+                           ->  Index Scan using account_account_number_key on account a  (cost=0.42..8.44 rows=1 width=8) (actual time=0.046..0.048 rows=1 loops=3)
+                                 Index Cond: (account_number = '3000012345'::bpchar)
+                                 Buffers: shared hit=14
+               ->  Index Scan using txn_pkey on txn t  (cost=0.43..0.61 rows=1 width=21) (actual time=0.031..0.031 rows=1 loops=4)
+                     Index Cond: (txn_id = l.txn_id)
+                     Buffers: shared hit=17
+ Planning:
+   Buffers: shared hit=26
+ Planning Time: 0.704 ms
+ Execution Time: 333.642 ms
+
+### Q2 Case-insensitive customer lookup by e-mail (support desk / login)
+SELECT customer_id, first_name, last_name, email, kyc_tier
+  FROM customer WHERE lower(email) = lower('USER4521@Mail.Example.NG');
+ customer_id | first_name | last_name |          email           | kyc_tier 
+-------------+------------+-----------+--------------------------+----------
+        4536 | Ngozi      | Obi       | user4521@mail.example.ng |        1
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT customer_id, first_name, last_name, email, kyc_tier
+  FROM customer WHERE lower(email) = lower('USER4521@Mail.Example.NG');
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+ Seq Scan on customer  (cost=0.00..1824.16 rows=300 width=47) (actual time=4.590..74.716 rows=1 loops=1)
+   Filter: (lower((email)::text) = 'user4521@mail.example.ng'::text)
+   Rows Removed by Filter: 60010
+   Buffers: shared hit=924
+ Planning Time: 0.106 ms
+ Execution Time: 74.739 ms
+
+### Q3 Failed transactions per channel in the last 30 days (operations dashboard)
+SELECT channel, count(*) AS failed, sum(amount) AS failed_value
+  FROM txn
+ WHERE status = 'FAILED' AND created_at >= now() - INTERVAL '30 days'
+ GROUP BY channel ORDER BY failed DESC;
+ channel | failed | failed_value 
+---------+--------+--------------
+ MOBILE  |   1757 |  17887085.58
+ USSD    |    596 |   5824726.03
+ ATM     |    577 |   5811518.54
+ WEB     |    574 |   5662280.85
+ POS     |    572 |   5675885.85
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT channel, count(*) AS failed, sum(amount) AS failed_value
+  FROM txn
+ WHERE status = 'FAILED' AND created_at >= now() - INTERVAL '30 days'
+ GROUP BY channel ORDER BY failed DESC;
+                                                                   QUERY PLAN                                                                    
+-------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort  (cost=26741.08..26741.09 rows=6 width=45) (actual time=178.008..181.668 rows=5 loops=1)
+   Sort Key: (count(*)) DESC
+   Sort Method: quicksort  Memory: 25kB
+   Buffers: shared hit=271 read=16275
+   ->  Finalize GroupAggregate  (cost=26723.86..26741.00 rows=6 width=45) (actual time=177.699..181.656 rows=5 loops=1)
+         Group Key: channel
+         Buffers: shared hit=271 read=16275
+         ->  Gather Merge  (cost=26723.86..26740.80 rows=12 width=45) (actual time=177.396..181.614 rows=15 loops=1)
+               Workers Planned: 2
+               Workers Launched: 2
+               Buffers: shared hit=271 read=16275
+               ->  Partial GroupAggregate  (cost=25723.84..25739.39 rows=6 width=45) (actual time=170.171..170.806 rows=5 loops=3)
+                     Group Key: channel
+                     Buffers: shared hit=271 read=16275
+                     ->  Sort  (cost=25723.84..25727.71 rows=1548 width=12) (actual time=170.036..170.209 rows=1359 loops=3)
+                           Sort Key: channel
+                           Sort Method: quicksort  Memory: 94kB
+                           Buffers: shared hit=271 read=16275
+                           Worker 0:  Sort Method: quicksort  Memory: 107kB
+                           Worker 1:  Sort Method: quicksort  Memory: 104kB
+                           ->  Parallel Seq Scan on txn  (cost=0.00..25641.83 rows=1548 width=12) (actual time=0.171..167.871 rows=1359 loops=3)
+                                 Filter: (((status)::text = 'FAILED'::text) AND (created_at >= (now() - '30 days'::interval)))
+                                 Rows Removed by Filter: 365434
+                                 Buffers: shared hit=197 read=16275
+ Planning Time: 0.210 ms
+ Execution Time: 181.742 ms
+
+### Q4 Top 10 customers by outgoing value in the last 7 days (relationship managers)
+SELECT c.customer_id, c.first_name || ' ' || c.last_name AS customer, sum(l.amount) AS sent_7d, count(*) AS n
+  FROM ledger_entry l
+  JOIN account a  ON a.account_id = l.account_id
+  JOIN customer c ON c.customer_id = a.customer_id
+ WHERE l.direction = 'D' AND a.type_code <> 'GL'
+   AND l.created_at >= now() - INTERVAL '7 days'
+ GROUP BY c.customer_id, customer ORDER BY sent_7d DESC LIMIT 10;
+ customer_id |      customer      |  sent_7d  | n 
+-------------+--------------------+-----------+---
+           2 | Adaeze Okafor      | 525000.00 | 2
+           6 | Emeka Nwosu        | 150000.00 | 1
+          10 | Ngozi Obi          |  72000.00 | 1
+       16834 | Seun Eze           |  60464.04 | 4
+       12604 | Aisha Obi          |  58555.22 | 5
+       25697 | Zainab Balogun     |  55935.43 | 4
+        5844 | Adaeze Abubakar    |  54928.97 | 4
+       19117 | Kelechi Obi        |  54850.17 | 4
+       20400 | Chinedu Igbinedion |  53641.73 | 4
+        3411 | Musa Okafor        |  52407.38 | 3
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT c.customer_id, c.first_name || ' ' || c.last_name AS customer, sum(l.amount) AS sent_7d, count(*) AS n
+  FROM ledger_entry l
+  JOIN account a  ON a.account_id = l.account_id
+  JOIN customer c ON c.customer_id = a.customer_id
+ WHERE l.direction = 'D' AND a.type_code <> 'GL'
+   AND l.created_at >= now() - INTERVAL '7 days'
+ GROUP BY c.customer_id, customer ORDER BY sent_7d DESC LIMIT 10;
+                                                                               QUERY PLAN                                                                                
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=48960.76..48960.78 rows=10 width=80) (actual time=526.668..528.879 rows=10 loops=1)
+   Buffers: shared hit=26693
+   ->  Sort  (cost=48960.76..49007.79 rows=18812 width=80) (actual time=526.666..528.874 rows=10 loops=1)
+         Sort Key: (sum(l.amount)) DESC
+         Sort Method: top-N heapsort  Memory: 26kB
+         Buffers: shared hit=26693
+         ->  Finalize HashAggregate  (cost=48225.03..48554.24 rows=18812 width=80) (actual time=510.773..523.292 rows=15866 loops=1)
+               Group Key: c.customer_id, ((((c.first_name)::text || ' '::text) || (c.last_name)::text))
+               Batches: 1  Memory Usage: 7953kB
+               Buffers: shared hit=26693
+               ->  Gather  (cost=46324.31..48029.08 rows=15676 width=80) (actual time=479.029..490.539 rows=16688 loops=1)
+                     Workers Planned: 2
+                     Workers Launched: 2
+                     Buffers: shared hit=26693
+                     ->  Partial HashAggregate  (cost=45324.31..45461.48 rows=7838 width=80) (actual time=473.392..478.119 rows=5563 loops=3)
+                           Group Key: c.customer_id, (((c.first_name)::text || ' '::text) || (c.last_name)::text)
+                           Batches: 1  Memory Usage: 3473kB
+                           Buffers: shared hit=26693
+                           Worker 0:  Batches: 1  Memory Usage: 3473kB
+                           Worker 1:  Batches: 1  Memory Usage: 3473kB
+                           ->  Hash Join  (cost=6117.02..45245.93 rows=7838 width=47) (actual time=125.585..456.097 rows=6231 loops=3)
+                                 Hash Cond: (a.customer_id = c.customer_id)
+                                 Buffers: shared hit=26693
+                                 ->  Parallel Hash Join  (cost=3842.78..42911.92 rows=7838 width=15) (actual time=56.998..377.250 rows=6231 loops=3)
+                                       Hash Cond: (l.account_id = a.account_id)
+                                       Buffers: shared hit=23915
+                                       ->  Parallel Seq Scan on ledger_entry l  (cost=0.00..39048.57 rows=7838 width=15) (actual time=15.339..324.988 rows=6234 loops=3)
+                                             Filter: ((direction = 'D'::bpchar) AND (created_at >= (now() - '7 days'::interval)))
+                                             Rows Removed by Filter: 693988
+                                             Buffers: shared hit=21543
+                                       ->  Parallel Hash  (cost=3107.39..3107.39 rows=58831 width=16) (actual time=40.249..40.251 rows=33337 loops=3)
+                                             Buckets: 131072  Batches: 1  Memory Usage: 5760kB
+                                             Buffers: shared hit=2372
+                                             ->  Parallel Seq Scan on account a  (cost=0.00..3107.39 rows=58831 width=16) (actual time=0.014..16.360 rows=33337 loops=3)
+                                                   Filter: ((type_code)::text <> 'GL'::text)
+                                                   Rows Removed by Filter: 1
+                                                   Buffers: shared hit=2372
+                                 ->  Hash  (cost=1524.11..1524.11 rows=60011 width=20) (actual time=68.297..68.298 rows=60011 loops=3)
+                                       Buckets: 65536  Batches: 1  Memory Usage: 3636kB
+                                       Buffers: shared hit=2772
+                                       ->  Seq Scan on customer c  (cost=0.00..1524.11 rows=60011 width=20) (actual time=0.046..28.010 rows=60011 loops=3)
+                                             Buffers: shared hit=2772
+ Planning:
+   Buffers: shared hit=23
+ Planning Time: 0.743 ms
+ Execution Time: 529.159 ms
+
+### Q5 Fraud velocity rule: accounts credited by >= 50 distinct senders in one hour (last 7 days)
+WITH credits AS (
+    SELECT cr.account_id AS receiver, dr.account_id AS sender, cr.created_at
+      FROM ledger_entry cr
+      JOIN ledger_entry dr ON dr.txn_id = cr.txn_id AND dr.direction = 'D'
+     WHERE cr.direction = 'C' AND cr.created_at >= now() - INTERVAL '7 days')
+SELECT a.account_number, date_trunc('hour', c.created_at) AS hour_bucket,
+       count(DISTINCT c.sender) AS distinct_senders
+  FROM credits c JOIN account a ON a.account_id = c.receiver
+ GROUP BY 1, 2 HAVING count(DISTINCT c.sender) >= 50 ORDER BY 3 DESC;
+ account_number |      hour_bucket       | distinct_senders 
+----------------+------------------------+------------------
+ 3000050001     | 2026-11-08 23:00:00+00 |              109
+ 3000060002     | 2026-11-08 23:00:00+00 |              106
+ 3000070003     | 2026-11-08 23:00:00+00 |              106
+
+EXPLAIN (ANALYZE, BUFFERS)
+WITH credits AS (
+    SELECT cr.account_id AS receiver, dr.account_id AS sender, cr.created_at
+      FROM ledger_entry cr
+      JOIN ledger_entry dr ON dr.txn_id = cr.txn_id AND dr.direction = 'D'
+     WHERE cr.direction = 'C' AND cr.created_at >= now() - INTERVAL '7 days')
+SELECT a.account_number, date_trunc('hour', c.created_at) AS hour_bucket,
+       count(DISTINCT c.sender) AS distinct_senders
+  FROM credits c JOIN account a ON a.account_id = c.receiver
+ GROUP BY 1, 2 HAVING count(DISTINCT c.sender) >= 50 ORDER BY 3 DESC;
+                                                                              QUERY PLAN                                                                              
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort  (cost=69515.57..69530.65 rows=6030 width=27) (actual time=494.087..503.258 rows=3 loops=1)
+   Sort Key: (count(DISTINCT dr.account_id)) DESC
+   Sort Method: quicksort  Memory: 25kB
+   Buffers: shared hit=75179 read=5010 written=8
+   ->  GroupAggregate  (cost=66653.33..69136.95 rows=6030 width=27) (actual time=482.114..503.243 rows=3 loops=1)
+         Group Key: a.account_number, (date_trunc('hour'::text, cr.created_at))
+         Filter: (count(DISTINCT dr.account_id) >= 50)
+         Rows Removed by Filter: 18327
+         Buffers: shared hit=75179 read=5010 written=8
+         ->  Gather Merge  (cost=66653.33..68760.10 rows=18089 width=27) (actual time=470.263..496.465 rows=18703 loops=1)
+               Workers Planned: 2
+               Workers Launched: 2
+               Buffers: shared hit=75179 read=5010 written=8
+               ->  Sort  (cost=65653.31..65672.15 rows=7537 width=27) (actual time=450.274..450.757 rows=6234 loops=3)
+                     Sort Key: a.account_number, (date_trunc('hour'::text, cr.created_at)), dr.account_id
+                     Sort Method: quicksort  Memory: 559kB
+                     Buffers: shared hit=75179 read=5010 written=8
+                     Worker 0:  Sort Method: quicksort  Memory: 522kB
+                     Worker 1:  Sort Method: quicksort  Memory: 520kB
+                     ->  Parallel Hash Join  (cost=3696.13..65167.94 rows=7537 width=27) (actual time=67.806..427.839 rows=6234 loops=3)
+                           Hash Cond: (cr.account_id = a.account_id)
+                           Buffers: shared hit=75133 read=5010 written=8
+                           ->  Nested Loop  (cost=0.43..61433.61 rows=7537 width=24) (actual time=10.264..356.027 rows=6234 loops=3)
+                                 Buffers: shared hit=72665 read=5010 written=8
+                                 ->  Parallel Seq Scan on ledger_entry cr  (cost=0.00..39048.57 rows=7833 width=24) (actual time=10.179..278.160 rows=6234 loops=3)
+                                       Filter: ((direction = 'C'::bpchar) AND (created_at >= (now() - '7 days'::interval)))
+                                       Rows Removed by Filter: 693988
+                                       Buffers: shared hit=20685 read=858
+                                 ->  Index Only Scan using uq_leg on ledger_entry dr  (cost=0.43..2.85 rows=1 width=16) (actual time=0.011..0.011 rows=1 loops=18703)
+                                       Index Cond: ((txn_id = cr.txn_id) AND (direction = 'D'::bpchar))
+                                       Heap Fetches: 18
+                                       Buffers: shared hit=51980 read=4152 written=8
+                           ->  Parallel Hash  (cost=2960.31..2960.31 rows=58831 width=19) (actual time=54.782..54.783 rows=33338 loops=3)
+                                 Buckets: 131072  Batches: 1  Memory Usage: 6560kB
+                                 Buffers: shared hit=2372
+                                 ->  Parallel Seq Scan on account a  (cost=0.00..2960.31 rows=58831 width=19) (actual time=0.017..11.614 rows=33338 loops=3)
+                                       Buffers: shared hit=2372
+ Planning:
+   Buffers: shared hit=26
+ Planning Time: 1.003 ms
+ Execution Time: 503.345 ms
+
+### Q6 Reconciliation: stored balance vs latest ledger balance (sample of 50 accounts)
+SELECT count(*) AS checked,
+       count(*) FILTER (WHERE last.balance_after <> a.balance) AS mismatches
+  FROM account a
+  CROSS JOIN LATERAL (SELECT balance_after FROM ledger_entry l
+                       WHERE l.account_id = a.account_id
+                       ORDER BY l.created_at DESC, l.entry_id DESC LIMIT 1) last
+ WHERE a.account_number BETWEEN '3000020000' AND '3000020049';
+ checked | mismatches 
+---------+------------
+      50 |          0
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT count(*) AS checked,
+       count(*) FILTER (WHERE last.balance_after <> a.balance) AS mismatches
+  FROM account a
+  CROSS JOIN LATERAL (SELECT balance_after FROM ledger_entry l
+                       WHERE l.account_id = a.account_id
+                       ORDER BY l.created_at DESC, l.entry_id DESC LIMIT 1) last
+ WHERE a.account_number BETWEEN '3000020000' AND '3000020049';
+                                                                     QUERY PLAN                                                                      
+-----------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=95614.41..95614.42 rows=1 width=16) (actual time=11101.455..11101.457 rows=1 loops=1)
+   Buffers: shared hit=989303 read=87900
+   ->  Nested Loop  (cost=47801.89..95614.39 rows=2 width=16) (actual time=181.670..11101.191 rows=50 loops=1)
+         Buffers: shared hit=989303 read=87900
+         ->  Index Scan using account_account_number_key on account a  (cost=0.42..11.40 rows=2 width=16) (actual time=0.053..0.462 rows=50 loops=1)
+               Index Cond: ((account_number >= '3000020000'::bpchar) AND (account_number <= '3000020049'::bpchar))
+               Buffers: shared hit=53
+         ->  Limit  (cost=47801.48..47801.48 rows=1 width=24) (actual time=222.007..222.007 rows=1 loops=50)
+               Buffers: shared hit=989250 read=87900
+               ->  Sort  (cost=47801.48..47801.54 rows=25 width=24) (actual time=221.999..221.999 rows=1 loops=50)
+                     Sort Key: l.created_at DESC, l.entry_id DESC
+                     Sort Method: top-N heapsort  Memory: 25kB
+                     Buffers: shared hit=989250 read=87900
+                     ->  Seq Scan on ledger_entry l  (cost=0.00..47801.35 rows=25 width=24) (actual time=55.896..221.966 rows=20 loops=50)
+                           Filter: (account_id = a.account_id)
+                           Rows Removed by Filter: 2100648
+                           Buffers: shared hit=989250 read=87900
+ Planning Time: 0.230 ms
+ Execution Time: 11101.496 ms
+
+### Q7 Dormant accounts: no ledger activity in the last 180 days (CBN dormancy report, anti-join)
+SELECT count(*) AS dormant_accounts
+  FROM account a
+ WHERE a.type_code <> 'GL'
+   AND NOT EXISTS (SELECT 1 FROM ledger_entry l
+                    WHERE l.account_id = a.account_id
+                      AND l.created_at >= now() - INTERVAL '180 days');
+ dormant_accounts 
+------------------
+                6
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT count(*) AS dormant_accounts
+  FROM account a
+ WHERE a.type_code <> 'GL'
+   AND NOT EXISTS (SELECT 1 FROM ledger_entry l
+                    WHERE l.account_id = a.account_id
+                      AND l.created_at >= now() - INTERVAL '180 days');
+                                                                       QUERY PLAN                                                                        
+---------------------------------------------------------------------------------------------------------------------------------------------------------
+ Finalize Aggregate  (cost=46363.87..46363.88 rows=1 width=8) (actual time=563.573..575.191 rows=1 loops=1)
+   Buffers: shared hit=22409 read=1630
+   ->  Gather  (cost=46363.66..46363.87 rows=2 width=8) (actual time=551.054..575.167 rows=3 loops=1)
+         Workers Planned: 2
+         Workers Launched: 2
+         Buffers: shared hit=22409 read=1630
+         ->  Partial Aggregate  (cost=45363.66..45363.67 rows=1 width=8) (actual time=548.568..548.573 rows=1 loops=3)
+               Buffers: shared hit=22409 read=1630
+               ->  Parallel Hash Right Anti Join  (cost=3842.78..45346.64 rows=6806 width=0) (actual time=545.111..548.561 rows=2 loops=3)
+                     Hash Cond: (l.account_id = a.account_id)
+                     Buffers: shared hit=22409 read=1630
+                     ->  Parallel Seq Scan on ledger_entry l  (cost=0.00..36860.37 rows=389128 width=8) (actual time=9.839..407.939 rows=313003 loops=3)
+                           Filter: (created_at >= (now() - '180 days'::interval))
+                           Rows Removed by Filter: 387220
+                           Buffers: shared hit=19913 read=1630
+                     ->  Parallel Hash  (cost=3107.39..3107.39 rows=58831 width=8) (actual time=23.700..23.701 rows=33337 loops=3)
+                           Buckets: 131072  Batches: 1  Memory Usage: 4960kB
+                           Buffers: shared hit=2372
+                           ->  Parallel Seq Scan on account a  (cost=0.00..3107.39 rows=58831 width=8) (actual time=0.028..10.730 rows=33337 loops=3)
+                                 Filter: ((type_code)::text <> 'GL'::text)
+                                 Rows Removed by Filter: 1
+                                 Buffers: shared hit=2372
+ Planning:
+   Buffers: shared hit=8
+ Planning Time: 0.310 ms
+ Execution Time: 575.275 ms
+

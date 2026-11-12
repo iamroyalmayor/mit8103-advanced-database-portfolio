@@ -1,0 +1,77 @@
+===================================================================
+S6 FIX: both sessions lock rows in account_number order (as transfer_funds does)
+===================================================================
+------------------------- Session A -------------------------------
+[A] SET search_path TO nairaflow;
+[A] SET
+[A] BEGIN;
+[A] BEGIN
+[A] SELECT ts('A: lock both accounts in a fixed order');
+[A]                           ts                          
+[A] ------------------------------------------------------
+[A]  22:59:40.324  A: lock both accounts in a fixed order
+[A] (1 row)
+[A] 
+[A] SELECT account_number FROM account WHERE account_number IN ('0123456781','0123456783')
+[A]  ORDER BY account_number FOR UPDATE;
+[A]  account_number 
+[A] ----------------
+[A]  0123456781
+[A]  0123456783
+[A] (2 rows)
+[A] 
+[A] SELECT ts('A: both locks held'), pg_sleep(3);
+[A]                 ts                | pg_sleep 
+[A] ----------------------------------+----------
+[A]  22:59:40.327  A: both locks held | 
+[A] (1 row)
+[A] 
+[A] UPDATE account SET balance = balance - 100 WHERE account_number = '0123456781';
+[A] UPDATE 1
+[A] UPDATE account SET balance = balance + 100 WHERE account_number = '0123456783';
+[A] UPDATE 1
+[A] COMMIT;
+[A] COMMIT
+[A] SELECT ts('A: committed (no deadlock)');
+[A]                     ts                    
+[A] ------------------------------------------
+[A]  22:59:43.334  A: committed (no deadlock)
+[A] (1 row)
+[A] 
+------------------------- Session B -------------------------------
+[B] SET search_path TO nairaflow;
+[B] SET
+[B] BEGIN;
+[B] BEGIN
+[B] SELECT ts('B: lock both accounts in a fixed order');
+[B]                           ts                          
+[B] ------------------------------------------------------
+[B]  22:59:41.087  B: lock both accounts in a fixed order
+[B] (1 row)
+[B] 
+[B] SELECT account_number FROM account WHERE account_number IN ('0123456781','0123456783')
+[B]  ORDER BY account_number FOR UPDATE;
+[B]  account_number 
+[B] ----------------
+[B]  0123456781
+[B]  0123456783
+[B] (2 rows)
+[B] 
+[B] SELECT ts('B: both locks held'), pg_sleep(1);
+[B]                 ts                | pg_sleep 
+[B] ----------------------------------+----------
+[B]  22:59:43.335  B: both locks held | 
+[B] (1 row)
+[B] 
+[B] UPDATE account SET balance = balance + 100 WHERE account_number = '0123456781';
+[B] UPDATE 1
+[B] UPDATE account SET balance = balance - 100 WHERE account_number = '0123456783';
+[B] UPDATE 1
+[B] COMMIT;
+[B] COMMIT
+[B] SELECT ts('B: committed (no deadlock)');
+[B]                     ts                    
+[B] ------------------------------------------
+[B]  22:59:44.342  B: committed (no deadlock)
+[B] (1 row)
+[B] 

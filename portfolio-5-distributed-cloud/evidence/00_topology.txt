@@ -1,0 +1,6 @@
+NAME            IMAGE         STATUS
+p5-mongo1       mongo:7       Up 13 seconds
+p5-mongo2       mongo:7       Up 10 seconds
+p5-mongo3       mongo:7       Up 11 seconds
+p5-pg-primary   postgres:16   Up 12 seconds (healthy)
+p5-pg-replica   postgres:16   Up 6 seconds

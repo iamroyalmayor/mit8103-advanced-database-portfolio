@@ -1,0 +1,42 @@
+=== BEFORE unsafe run ===
+SET
+ hot_accounts | hot_set_total | all_accounts_total_must_be_zero | negative_balances 
+--------------+---------------+---------------------------------+-------------------
+           50 |   25301024.94 |                            0.00 |                 0
+
+ hot_accounts_where_balance_differs_from_ledger 
+------------------------------------------------
+                                              0
+
+ pgbench_txns | unbalanced_pgbench_txns 
+--------------+-------------------------
+            0 |                       0
+
+=== pgbench: UNSAFE read-modify-write, 16 clients, 15 s ===
+pgbench (16.15 (Debian 16.15-1.pgdg13+2))
+transaction type: /tmp/unsafe_transfer.sql
+scaling factor: 1
+query mode: simple
+number of clients: 16
+number of threads: 4
+maximum number of tries: 1
+duration: 15 s
+number of transactions actually processed: 4051
+number of failed transactions: 21 (0.516%)
+latency average = 60.307 ms (including failures)
+initial connection time = 30.355 ms
+tps = 263.940227 (without initial connection time)
+=== AFTER unsafe run (money created/destroyed by lost updates) ===
+SET
+ hot_accounts | hot_set_total | all_accounts_total_must_be_zero | negative_balances 
+--------------+---------------+---------------------------------+-------------------
+           50 |   25318765.94 |                        17741.00 |                 0
+
+ hot_accounts_where_balance_differs_from_ledger 
+------------------------------------------------
+                                             50
+
+ pgbench_txns | unbalanced_pgbench_txns 
+--------------+-------------------------
+            0 |                       0
+

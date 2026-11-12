@@ -1,0 +1,63 @@
+===================================================================
+S2 FIX 1: pessimistic row lock (SELECT ... FOR UPDATE)
+===================================================================
+------------------------- Session A -------------------------------
+[A] SET search_path TO nairaflow;
+[A] SET
+[A] BEGIN;
+[A] BEGIN
+[A] SELECT ts('A: read + lock row (FOR UPDATE)');
+[A]                       ts                       
+[A] -----------------------------------------------
+[A]  22:58:58.483  A: read + lock row (FOR UPDATE)
+[A] (1 row)
+[A] 
+[A] SELECT balance AS bal FROM account WHERE account_number = '0123456787' FOR UPDATE 
+[A] A sees balance 682000.00
+[A] SELECT ts('A: app thinking (3s) while holding the row lock'), pg_sleep(3);
+[A]                               ts                               | pg_sleep 
+[A] ---------------------------------------------------------------+----------
+[A]  22:58:58.485  A: app thinking (3s) while holding the row lock | 
+[A] (1 row)
+[A] 
+[A] UPDATE account SET balance = 682000.00 - 50000 WHERE account_number = '0123456787';
+[A] UPDATE 1
+[A] COMMIT;
+[A] COMMIT
+[A] SELECT ts('A: committed, lock released');
+[A]                     ts                     
+[A] -------------------------------------------
+[A]  22:59:01.490  A: committed, lock released
+[A] (1 row)
+[A] 
+------------------------- Session B -------------------------------
+[B] SET search_path TO nairaflow;
+[B] SET
+[B] BEGIN;
+[B] BEGIN
+[B] SELECT ts('B: request row lock (FOR UPDATE)');
+[B]                        ts                       
+[B] ------------------------------------------------
+[B]  22:58:59.754  B: request row lock (FOR UPDATE)
+[B] (1 row)
+[B] 
+[B] SELECT balance AS bal FROM account WHERE account_number = '0123456787' FOR UPDATE 
+[B] SELECT ts('B: lock granted after A committed');
+[B]                        ts                        
+[B] -------------------------------------------------
+[B]  22:59:01.490  B: lock granted after A committed
+[B] (1 row)
+[B] 
+[B] B sees balance 632000.00
+[B] UPDATE account SET balance = 632000.00 - 30000 WHERE account_number = '0123456787';
+[B] UPDATE 1
+[B] COMMIT;
+[B] COMMIT
+[B] SELECT ts('B: committed');
+[B]              ts             
+[B] ----------------------------
+[B]  22:59:01.495  B: committed
+[B] (1 row)
+[B] 
+
+RESULT: start=682000.00  final=602000.00  expected=602000.00  -> both debits applied, B waited for A

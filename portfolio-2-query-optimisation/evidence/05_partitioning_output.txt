@@ -1,0 +1,193 @@
+SET search_path TO nairaflow;
+SET
+SET jit = off;
+SET
+Timing is on.
+DROP TABLE IF EXISTS ledger_entry_part CASCADE;
+psql:/tmp/04_partitioning.sql:14: NOTICE:  table "ledger_entry_part" does not exist, skipping
+DROP TABLE
+Time: 0.818 ms
+DO $$                                   -- also drop archives detached by a previous run
+DECLARE r RECORD;
+BEGIN
+  FOR r IN SELECT tablename FROM pg_tables
+            WHERE schemaname = 'nairaflow' AND tablename LIKE 'ledger\_entry\_p%' LOOP
+    EXECUTE format('DROP TABLE nairaflow.%I', r.tablename);
+  END LOOP;
+END $$;
+DO
+Time: 6.258 ms
+CREATE TABLE ledger_entry_part (
+    entry_id      BIGINT        NOT NULL,
+    txn_id        BIGINT        NOT NULL,
+    account_id    BIGINT        NOT NULL,
+    direction     CHAR(1)       NOT NULL CHECK (direction IN ('D','C')),
+    amount        NUMERIC(18,2) NOT NULL CHECK (amount > 0),
+    balance_after NUMERIC(18,2) NOT NULL,
+    created_at    TIMESTAMPTZ   NOT NULL,
+    PRIMARY KEY (entry_id, created_at)          -- partition key must be part of the PK
+) PARTITION BY RANGE (created_at);
+CREATE TABLE
+Time: 7.039 ms
+DO $$
+DECLARE m DATE := date_trunc('month', now() - INTERVAL '13 months')::date;
+BEGIN
+  WHILE m <= date_trunc('month', now())::date LOOP
+    EXECUTE format('CREATE TABLE ledger_entry_p%s PARTITION OF ledger_entry_part
+                    FOR VALUES FROM (%L) TO (%L)',
+                   to_char(m,'YYYYMM'), m, (m + INTERVAL '1 month')::date);
+    m := (m + INTERVAL '1 month')::date;
+  END LOOP;
+END $$;
+DO
+Time: 104.448 ms
+CREATE TABLE ledger_entry_pdefault PARTITION OF ledger_entry_part DEFAULT;
+CREATE TABLE
+Time: 10.139 ms
+INSERT INTO ledger_entry_part
+SELECT entry_id, txn_id, account_id, direction, amount, balance_after, created_at FROM ledger_entry;
+INSERT 0 2100668
+Time: 10890.256 ms (00:10.890)
+CREATE INDEX ON ledger_entry_part (account_id, created_at DESC);
+CREATE INDEX
+Time: 2949.760 ms (00:02.950)
+ANALYZE ledger_entry_part;
+ANALYZE
+Time: 2181.677 ms (00:02.182)
+=== Rows per partition ===
+SELECT tableoid::regclass AS partition, count(*) AS rows
+  FROM ledger_entry_part GROUP BY 1 ORDER BY 1;
+      partition       |  rows  
+----------------------+--------
+ ledger_entry_p202510 | 133822
+ ledger_entry_p202511 | 165654
+ ledger_entry_p202512 | 161912
+ ledger_entry_p202601 | 159486
+ ledger_entry_p202602 | 146004
+ ledger_entry_p202603 | 161354
+ ledger_entry_p202604 | 156140
+ ledger_entry_p202605 | 161320
+ ledger_entry_p202606 | 155994
+ ledger_entry_p202607 | 161790
+ ledger_entry_p202608 | 161260
+ ledger_entry_p202609 | 156908
+ ledger_entry_p202610 | 161066
+ ledger_entry_p202611 |  57958
+
+Time: 222.394 ms
+--- Index scans are switched off for P1/P2 so both sides use the same access method
+--- (sequential scan). This isolates the effect of partition pruning alone.
+SET enable_indexscan = off;
+SET
+Time: 0.214 ms
+SET enable_indexonlyscan = off;
+SET
+Time: 0.204 ms
+SET enable_bitmapscan = off;
+SET
+Time: 0.234 ms
+### P1 Monthly volume report for last month - NON-partitioned table
+EXPLAIN (ANALYZE, BUFFERS, COSTS OFF)
+SELECT direction, count(*), sum(amount)
+  FROM ledger_entry
+ WHERE created_at >= date_trunc('month', now()) - INTERVAL '1 month'
+   AND created_at <  date_trunc('month', now())
+ GROUP BY direction;
+                                                                           QUERY PLAN                                                                           
+----------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Finalize GroupAggregate (actual time=667.926..672.301 rows=2 loops=1)
+   Group Key: direction
+   Buffers: shared hit=46 read=21511
+   ->  Gather Merge (actual time=667.909..672.282 rows=6 loops=1)
+         Workers Planned: 2
+         Workers Launched: 2
+         Buffers: shared hit=46 read=21511
+         ->  Sort (actual time=663.517..663.519 rows=2 loops=3)
+               Sort Key: direction
+               Sort Method: quicksort  Memory: 25kB
+               Buffers: shared hit=46 read=21511
+               Worker 0:  Sort Method: quicksort  Memory: 25kB
+               Worker 1:  Sort Method: quicksort  Memory: 25kB
+               ->  Partial HashAggregate (actual time=663.479..663.481 rows=2 loops=3)
+                     Group Key: direction
+                     Batches: 1  Memory Usage: 24kB
+                     Buffers: shared hit=32 read=21511
+                     Worker 0:  Batches: 1  Memory Usage: 24kB
+                     Worker 1:  Batches: 1  Memory Usage: 24kB
+                     ->  Parallel Seq Scan on ledger_entry (actual time=34.102..632.872 rows=53689 loops=3)
+                           Filter: ((created_at < date_trunc('month'::text, now())) AND (created_at >= (date_trunc('month'::text, now()) - '1 mon'::interval)))
+                           Rows Removed by Filter: 646534
+                           Buffers: shared hit=32 read=21511
+ Planning:
+   Buffers: shared hit=28 read=5
+ Planning Time: 0.649 ms
+ Execution Time: 672.360 ms
+
+Time: 674.386 ms
+### P2 Same report - partitioned table (planner prunes to ONE partition)
+EXPLAIN (ANALYZE, BUFFERS, COSTS OFF)
+SELECT direction, count(*), sum(amount)
+  FROM ledger_entry_part
+ WHERE created_at >= date_trunc('month', now()) - INTERVAL '1 month'
+   AND created_at <  date_trunc('month', now())
+ GROUP BY direction;
+                                                                              QUERY PLAN                                                                              
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Finalize GroupAggregate (actual time=96.494..101.253 rows=2 loops=1)
+   Group Key: ledger_entry_part.direction
+   Buffers: shared hit=1675
+   ->  Gather Merge (actual time=96.482..101.238 rows=6 loops=1)
+         Workers Planned: 2
+         Workers Launched: 2
+         Buffers: shared hit=1675
+         ->  Sort (actual time=90.270..90.272 rows=2 loops=3)
+               Sort Key: ledger_entry_part.direction
+               Sort Method: quicksort  Memory: 25kB
+               Buffers: shared hit=1675
+               Worker 0:  Sort Method: quicksort  Memory: 25kB
+               Worker 1:  Sort Method: quicksort  Memory: 25kB
+               ->  Partial HashAggregate (actual time=90.177..90.179 rows=2 loops=3)
+                     Group Key: ledger_entry_part.direction
+                     Batches: 1  Memory Usage: 24kB
+                     Buffers: shared hit=1661
+                     Worker 0:  Batches: 1  Memory Usage: 24kB
+                     Worker 1:  Batches: 1  Memory Usage: 24kB
+                     ->  Parallel Append (actual time=0.029..64.094 rows=53689 loops=3)
+                           Buffers: shared hit=1661
+                           Subplans Removed: 14
+                           ->  Parallel Seq Scan on ledger_entry_p202610 ledger_entry_part_1 (actual time=0.028..57.682 rows=53689 loops=3)
+                                 Filter: ((created_at < date_trunc('month'::text, now())) AND (created_at >= (date_trunc('month'::text, now()) - '1 mon'::interval)))
+                                 Buffers: shared hit=1661
+ Planning:
+   Buffers: shared hit=215
+ Planning Time: 2.346 ms
+ Execution Time: 101.330 ms
+
+Time: 104.332 ms
+RESET enable_indexscan;
+RESET
+Time: 0.228 ms
+RESET enable_indexonlyscan;
+RESET
+Time: 0.189 ms
+RESET enable_bitmapscan;
+RESET
+Time: 0.288 ms
+=== Archiving the oldest month is a metadata operation, not a DELETE ===
+SELECT 'ledger_entry_p' || to_char(date_trunc('month', now() - INTERVAL '13 months'),'YYYYMM') AS oldest 
+Time: 0.496 ms
+ALTER TABLE ledger_entry_part DETACH PARTITION ledger_entry_p202510;
+ALTER TABLE
+Time: 2.948 ms
+SELECT count(*) AS rows_still_in_partitioned_table FROM ledger_entry_part;
+ rows_still_in_partitioned_table 
+---------------------------------
+                         1966846
+
+Time: 129.294 ms
+SELECT count(*) AS rows_in_detached_archive FROM ledger_entry_p202510;
+ rows_in_detached_archive 
+--------------------------
+                   133822
+
+Time: 13.059 ms

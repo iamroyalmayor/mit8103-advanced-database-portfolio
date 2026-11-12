@@ -1,0 +1,15 @@
+SET search_path TO nairaflow;
+SET
+CREATE OR REPLACE FUNCTION ts(label TEXT) RETURNS TEXT
+LANGUAGE sql VOLATILE AS $$ SELECT to_char(clock_timestamp(), 'HH24:MI:SS.MS') || '  ' || label $$;
+CREATE FUNCTION
+CREATE OR REPLACE FUNCTION resync_balance(p_account CHAR(10)) RETURNS NUMERIC
+LANGUAGE sql AS $$
+    UPDATE account a
+       SET balance = (SELECT l.balance_after FROM ledger_entry l
+                       WHERE l.account_id = a.account_id
+                       ORDER BY l.created_at DESC, l.entry_id DESC LIMIT 1)
+     WHERE a.account_number = p_account
+    RETURNING balance;
+$$;
+CREATE FUNCTION

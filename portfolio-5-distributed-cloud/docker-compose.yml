@@ -1,0 +1,42 @@
+# NairaFlow | Portfolio 5 - distributed topology on one laptop
+#   PostgreSQL 16: 1 primary + 1 streaming hot-standby replica
+#   MongoDB 7    : 3-member replica set (rs5)
+# Start:  docker compose up -d        Stop: docker compose down -v
+name: nairaflow-p5
+services:
+  pg-primary:
+    image: postgres:16
+    container_name: p5-pg-primary
+    environment:
+      POSTGRES_PASSWORD: nairaflow
+      POSTGRES_DB: nairaflow
+    command: >
+      postgres -c wal_level=replica -c max_wal_senders=10 -c max_replication_slots=10
+               -c hot_standby=on -c wal_keep_size=256MB
+    volumes:
+      - ./postgres-replication/primary-init.sh:/docker-entrypoint-initdb.d/00-replication.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d nairaflow"]
+      interval: 2s
+      retries: 30
+
+  pg-replica:
+    image: postgres:16
+    container_name: p5-pg-replica
+    user: postgres
+    environment:
+      PGPASSWORD: replicator-secret
+    depends_on:
+      pg-primary: { condition: service_healthy }
+    # Clone the primary with pg_basebackup (-R writes standby.signal + primary_conninfo),
+    # then start PostgreSQL as a read-only hot standby.
+    # (kept on one line: a folded YAML block would keep the line breaks of indented lines)
+    # Clone only on first start; after a restart the standby keeps its data and resumes from the slot.
+    command: ["bash", "-c", "if [ ! -s /var/lib/postgresql/data/PG_VERSION ]; then rm -rf /var/lib/postgresql/data/*; until pg_basebackup -d 'host=pg-primary user=replicator application_name=replica1' -D /var/lib/postgresql/data -R -X stream -S replica1_slot -C; do sleep 1; done; fi; chmod 0700 /var/lib/postgresql/data && exec postgres"]
+
+  mongo1: &mongo
+    image: mongo:7
+    container_name: p5-mongo1
+    command: ["--replSet", "rs5", "--bind_ip_all"]
+  mongo2: { <<: *mongo, container_name: p5-mongo2 }
+  mongo3: { <<: *mongo, container_name: p5-mongo3 }

@@ -1,0 +1,63 @@
+===================================================================
+S3 FIX 2: optimistic - REPEATABLE READ aborts the second writer
+===================================================================
+------------------------- Session A -------------------------------
+[A] SET search_path TO nairaflow;
+[A] SET
+[A] BEGIN ISOLATION LEVEL REPEATABLE READ;
+[A] BEGIN
+[A] SELECT ts('A: snapshot taken, read balance');
+[A]                       ts                       
+[A] -----------------------------------------------
+[A]  22:59:06.593  A: snapshot taken, read balance
+[A] (1 row)
+[A] 
+[A] SELECT balance AS bal FROM account WHERE account_number = '0123456787' 
+[A] A sees balance 682000.00
+[A] SELECT ts('A: app thinking (3s)...'), pg_sleep(3);
+[A]                   ts                   | pg_sleep 
+[A] ---------------------------------------+----------
+[A]  22:59:06.597  A: app thinking (3s)... | 
+[A] (1 row)
+[A] 
+[A] SELECT ts('A: try to write');
+[A]               ts               
+[A] -------------------------------
+[A]  22:59:09.598  A: try to write
+[A] (1 row)
+[A] 
+[A] UPDATE account SET balance = 682000.00 - 50000 WHERE account_number = '0123456787';
+[A] psql:/tmp/s3_repeatable_read_A.sql:9: ERROR:  could not serialize access due to concurrent update
+[A] COMMIT;
+[A] ROLLBACK
+[A] SELECT ts('A: transaction ended (application would now RETRY)');
+[A]                                 ts                                
+[A] ------------------------------------------------------------------
+[A]  22:59:09.603  A: transaction ended (application would now RETRY)
+[A] (1 row)
+[A] 
+------------------------- Session B -------------------------------
+[B] SET search_path TO nairaflow;
+[B] SET
+[B] BEGIN ISOLATION LEVEL REPEATABLE READ;
+[B] BEGIN
+[B] SELECT ts('B: read balance');
+[B]               ts               
+[B] -------------------------------
+[B]  22:59:07.653  B: read balance
+[B] (1 row)
+[B] 
+[B] SELECT balance AS bal FROM account WHERE account_number = '0123456787' 
+[B] B sees balance 682000.00
+[B] UPDATE account SET balance = 682000.00 - 30000 WHERE account_number = '0123456787';
+[B] UPDATE 1
+[B] COMMIT;
+[B] COMMIT
+[B] SELECT ts('B: committed first');
+[B]                 ts                
+[B] ----------------------------------
+[B]  22:59:07.666  B: committed first
+[B] (1 row)
+[B] 
+
+RESULT: start=682000.00  final=652000.00  -> only B applied; A got a serialization failure and must retry (no silent loss)

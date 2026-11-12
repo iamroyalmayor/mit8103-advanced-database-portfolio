@@ -1,0 +1,143 @@
+SET search_path TO nairaflow;
+SET
+CREATE OR REPLACE VIEW demo_bal AS
+SELECT account_number, balance FROM account
+ WHERE account_number IN ('0123456781','0123456783') ORDER BY account_number;
+CREATE VIEW
+=== Starting balances ===
+SELECT * FROM demo_bal;
+ account_number |  balance  
+----------------+-----------
+ 0123456781     | 825000.00
+ 0123456783     | 345000.00
+
+=== A. COMMIT: transfer N10,000 Adaeze -> Babatunde inside an explicit transaction ===
+BEGIN;
+BEGIN
+SELECT transfer_funds('0123456781','0123456783', 10000.00, 'MOBILE', 'P3 commit demo') AS txn_id;
+ txn_id  
+---------
+ 1100383
+
+SELECT * FROM demo_bal;
+ account_number |  balance  
+----------------+-----------
+ 0123456781     | 815000.00
+ 0123456783     | 355000.00
+
+COMMIT;
+COMMIT
+SELECT * FROM demo_bal;
+ account_number |  balance  
+----------------+-----------
+ 0123456781     | 815000.00
+ 0123456783     | 355000.00
+
+SELECT txn_id, txn_type, status, amount FROM txn WHERE narration = 'P3 commit demo';
+ txn_id  | txn_type |  status   |  amount  
+---------+----------+-----------+----------
+ 1100383 | TRANSFER | COMPLETED | 10000.00
+
+=== B. ROLLBACK: operator debits an account by mistake and cancels ===
+BEGIN;
+BEGIN
+UPDATE account SET balance = balance - 99999 WHERE account_number = '0123456781';
+UPDATE 1
+SELECT * FROM demo_bal;
+ account_number |  balance  
+----------------+-----------
+ 0123456781     | 715001.00
+ 0123456783     | 355000.00
+
+ROLLBACK;
+ROLLBACK
+SELECT * FROM demo_bal;
+ account_number |  balance  
+----------------+-----------
+ 0123456781     | 815000.00
+ 0123456783     | 355000.00
+
+=== C. Automatic rollback: an error inside the transaction aborts ALL its work ===
+BEGIN;
+BEGIN
+SELECT transfer_funds('0123456781','0123456783', 1000.00, 'MOBILE', 'P3 auto-rollback part 1');
+ transfer_funds 
+----------------
+        1100384
+
+SELECT transfer_funds('0123456781','0123456783', 99999999.00, 'MOBILE', 'P3 auto-rollback part 2');
+psql:/tmp/01_commit_rollback_savepoint.sql:33: ERROR:  Insufficient funds: balance 814000.00, requested 99999999.00
+CONTEXT:  PL/pgSQL function transfer_funds(character,character,numeric,character varying,character varying,uuid,character varying) line 35 at RAISE
+SELECT 1;
+psql:/tmp/01_commit_rollback_savepoint.sql:34: ERROR:  current transaction is aborted, commands ignored until end of transaction block
+COMMIT;
+ROLLBACK
+SELECT count(*) AS rows_from_failed_txn FROM txn WHERE narration LIKE 'P3 auto-rollback%';
+ rows_from_failed_txn 
+----------------------
+                    0
+
+SELECT * FROM demo_bal;
+ account_number |  balance  
+----------------+-----------
+ 0123456781     | 815000.00
+ 0123456783     | 355000.00
+
+=== D. SAVEPOINT: bulk salary run where one beneficiary is invalid ===
+BEGIN;
+BEGIN
+SELECT transfer_funds('0123456786','0123456781', 150000.00, 'WEB', 'Salary Nov - Adaeze');
+ transfer_funds 
+----------------
+        1100385
+
+SAVEPOINT before_bad_row;
+SAVEPOINT
+SELECT transfer_funds('0123456786','9999999999', 150000.00, 'WEB', 'Salary Nov - unknown');
+psql:/tmp/01_commit_rollback_savepoint.sql:43: ERROR:  Unknown account
+CONTEXT:  PL/pgSQL function transfer_funds(character,character,numeric,character varying,character varying,uuid,character varying) line 29 at RAISE
+ROLLBACK TO SAVEPOINT before_bad_row;
+ROLLBACK
+SELECT transfer_funds('0123456786','0123456783', 150000.00, 'WEB', 'Salary Nov - Babatunde');
+ transfer_funds 
+----------------
+        1100386
+
+COMMIT;
+COMMIT
+SELECT narration, status, amount FROM txn WHERE narration LIKE 'Salary Nov%' ORDER BY txn_id;
+       narration        |  status   |  amount   
+------------------------+-----------+-----------
+ Salary Nov - Adaeze    | COMPLETED | 150000.00
+ Salary Nov - Babatunde | COMPLETED | 150000.00
+
+SELECT * FROM demo_bal;
+ account_number |  balance  
+----------------+-----------
+ 0123456781     | 965000.00
+ 0123456783     | 505000.00
+
+=== E. Idempotency: the same request reference submitted twice creates ONE transaction ===
+SELECT transfer_funds('0123456781','0123456783', 500.00, 'MOBILE', 'P3 idempotent',
+                      'a1b2c3d4-0000-4000-8000-000000008103') AS first_call;
+ first_call 
+------------
+    1100387
+
+SELECT transfer_funds('0123456781','0123456783', 500.00, 'MOBILE', 'P3 idempotent',
+                      'a1b2c3d4-0000-4000-8000-000000008103') AS retry_after_timeout;
+ retry_after_timeout 
+---------------------
+             1100387
+
+SELECT count(*) AS txns_created FROM txn WHERE narration = 'P3 idempotent';
+ txns_created 
+--------------
+            1
+
+=== Consistency check: all balances still sum to zero ===
+SELECT SUM(balance) AS total_of_all_balances FROM account;
+ total_of_all_balances 
+-----------------------
+                  0.00
+

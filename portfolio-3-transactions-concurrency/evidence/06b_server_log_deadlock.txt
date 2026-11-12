@@ -1,0 +1,4 @@
+2026-11-11 22:59:37.805 UTC [561] ERROR:  deadlock detected
+2026-11-11 22:59:37.805 UTC [561] DETAIL:  Process 561 waits for ShareLock on transaction 908; blocked by process 570.
+	Process 570 waits for ShareLock on transaction 907; blocked by process 561.
+	Process 561: UPDATE account SET balance = balance + 100 WHERE account_number = '0123456783';

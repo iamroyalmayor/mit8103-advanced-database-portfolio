@@ -1,0 +1,43 @@
+
+==================================================================
+M1 Initiate replica set rs5 (priority 2 on mongo1 makes it the preferred primary)
+==================================================================
+1
+  p5-mongo1:27017   PRIMARY    optime=2026-11-11T23:21:13.000Z
+  p5-mongo2:27017   SECONDARY  optime=2026-11-11T23:21:13.000Z
+  p5-mongo3:27017   SECONDARY  optime=2026-11-11T23:21:13.000Z
+
+==================================================================
+M2 Write with writeConcern majority (acknowledged by 2 of 3 members), then read from a SECONDARY
+==================================================================
+  inserted with w:majority
+  read from secondary -> P5-TX-1 amount 12000.00
+
+==================================================================
+M3 Unsatisfiable write concern: error is returned, but the write itself is NOT rolled back
+==================================================================
+  w:5 on a 3-member set -> UnsatisfiableWriteConcern
+
+==================================================================
+M4 Automatic failover: kill the PRIMARY and time the election
+==================================================================
+  current primary: p5-mongo1
+  p5-mongo1 killed at 00:21:28.007
+  new primary elected after ~11.5 s
+  p5-mongo1:27017   (not reachable/healthy)optime=1970-01-01T00:00:00.000Z
+  p5-mongo2:27017   SECONDARY  optime=2026-11-11T23:21:37.000Z
+  p5-mongo3:27017   PRIMARY    optime=2026-11-11T23:21:37.000Z
+
+==================================================================
+M5 Writes continue on the new primary (driver re-discovers topology, retryable writes)
+==================================================================
+  insert acknowledged: true | primary is now p5-mongo3:27017
+  documents: 3
+
+==================================================================
+M6 Old primary restarts, rejoins as SECONDARY, catches up, then regains PRIMARY (higher priority)
+==================================================================
+  p5-mongo1:27017   PRIMARY    optime=2026-11-11T23:22:02.000Z
+  p5-mongo2:27017   SECONDARY  optime=2026-11-11T23:22:02.000Z
+  p5-mongo3:27017   SECONDARY  optime=2026-11-11T23:22:02.000Z
+  P5-TX-2 present on rejoined node: true

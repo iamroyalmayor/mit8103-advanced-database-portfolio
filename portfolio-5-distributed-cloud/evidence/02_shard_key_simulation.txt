@@ -1,0 +1,75 @@
+SET search_path TO nairaflow;
+SET
+DROP TABLE IF EXISTS ledger_by_customer CASCADE;
+psql:/tmp/shard_key_simulation.sql:11: NOTICE:  table "ledger_by_customer" does not exist, skipping
+DROP TABLE
+CREATE TABLE ledger_by_customer (
+    entry_id BIGINT, customer_id BIGINT NOT NULL, account_id BIGINT, direction CHAR(1),
+    amount NUMERIC(18,2), created_at TIMESTAMPTZ
+) PARTITION BY HASH (customer_id);
+CREATE TABLE
+CREATE TABLE ledger_shard_0 PARTITION OF ledger_by_customer FOR VALUES WITH (MODULUS 4, REMAINDER 0);
+CREATE TABLE
+CREATE TABLE ledger_shard_1 PARTITION OF ledger_by_customer FOR VALUES WITH (MODULUS 4, REMAINDER 1);
+CREATE TABLE
+CREATE TABLE ledger_shard_2 PARTITION OF ledger_by_customer FOR VALUES WITH (MODULUS 4, REMAINDER 2);
+CREATE TABLE
+CREATE TABLE ledger_shard_3 PARTITION OF ledger_by_customer FOR VALUES WITH (MODULUS 4, REMAINDER 3);
+CREATE TABLE
+INSERT INTO ledger_by_customer
+SELECT g, 1 + (g * 7919) % 10000, g % 20000, CASE WHEN g % 2 = 0 THEN 'D' ELSE 'C' END,
+       (g % 5000) + 100, now() - ((g % 30) || ' days')::interval
+  FROM generate_series(1, 200000) g;
+INSERT 0 200000
+ANALYZE ledger_by_customer;
+ANALYZE
+=== A. Data distribution with HASH(customer_id): even spread, no hot shard ===
+SELECT tableoid::regclass AS shard, count(*) AS rows,
+       round(100.0 * count(*) / sum(count(*)) OVER (), 1) AS pct
+  FROM ledger_by_customer GROUP BY 1 ORDER BY 1;
+     shard      | rows  | pct  
+----------------+-------+------
+ ledger_shard_0 | 49780 | 24.9
+ ledger_shard_1 | 50540 | 25.3
+ ledger_shard_2 | 50600 | 25.3
+ ledger_shard_3 | 49080 | 24.5
+
+=== A. A single customer's statement touches exactly ONE shard (shard pruning) ===
+EXPLAIN (COSTS OFF) SELECT * FROM ledger_by_customer WHERE customer_id = 4521;
+                  QUERY PLAN                   
+-----------------------------------------------
+ Seq Scan on ledger_shard_1 ledger_by_customer
+   Filter: (customer_id = 4521)
+
+=== A. ...but a bank-wide "today" report must fan out to ALL shards (scatter-gather) ===
+EXPLAIN (COSTS OFF) SELECT sum(amount) FROM ledger_by_customer WHERE created_at >= now() - interval '1 day';
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Finalize Aggregate
+   ->  Gather
+         Workers Planned: 2
+         ->  Partial Aggregate
+               ->  Parallel Append
+                     ->  Parallel Seq Scan on ledger_shard_2 ledger_by_customer_3
+                           Filter: (created_at >= (now() - '1 day'::interval))
+                     ->  Parallel Seq Scan on ledger_shard_1 ledger_by_customer_2
+                           Filter: (created_at >= (now() - '1 day'::interval))
+                     ->  Parallel Seq Scan on ledger_shard_0 ledger_by_customer_1
+                           Filter: (created_at >= (now() - '1 day'::interval))
+                     ->  Parallel Seq Scan on ledger_shard_3 ledger_by_customer_4
+                           Filter: (created_at >= (now() - '1 day'::interval))
+
+=== B. With RANGE(created_at) as the shard key, 100% of today's writes hit ONE shard (write hotspot) ===
+SELECT CASE WHEN created_at >= now() - interval '7 days'  THEN 'shard_week_0 (current)'
+            WHEN created_at >= now() - interval '14 days' THEN 'shard_week_1'
+            WHEN created_at >= now() - interval '21 days' THEN 'shard_week_2'
+            ELSE 'shard_week_3' END AS shard,
+       count(*) FILTER (WHERE created_at >= now() - interval '1 day') AS writes_in_last_24h
+  FROM ledger_by_customer GROUP BY 1 ORDER BY 1;
+         shard          | writes_in_last_24h 
+------------------------+--------------------
+ shard_week_0 (current) |               6666
+ shard_week_1           |                  0
+ shard_week_2           |                  0
+ shard_week_3           |                  0
+

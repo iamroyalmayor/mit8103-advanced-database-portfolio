@@ -1,0 +1,51 @@
+Collections created: accounts, customers, statements, transactions
+{
+  '$jsonSchema': {
+    bsonType: 'object',
+    required: [
+      '_id',
+      'customerId',
+      'type',
+      'currency',
+      'balance',
+      'status'
+    ],
+    properties: {
+      _id: {
+        bsonType: 'string',
+        pattern: '^[0-9]{10}$',
+        description: 'NUBAN account number'
+      },
+      customerId: {
+        bsonType: 'string'
+      },
+      holderName: {
+        bsonType: 'string',
+        description: 'denormalised for statements/receipts'
+      },
+      type: {
+        enum: [
+          'SAVINGS',
+          'CURRENT',
+          'GL'
+        ]
+      },
+      currency: {
+        enum: [
+          'NGN',
+          'USD'
+        ]
+      },
+      balance: {
+        bsonType: 'decimal'
+      },
+      status: {
+        enum: [
+          'ACTIVE',
+          'FROZEN',
+          'CLOSED'
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,62 @@
+
+### M1 Last 90 days of activity for account 4000001234 (query on embedded legs.account)
+  before   stage=COLLSCAN docsExamined=157974  keysExamined=0       returned=13    ms=326
+  after    stage=IXSCAN   docsExamined=13      keysExamined=13      returned=13    ms=4
+   2026-11-06T15:36 TRF-0046289 MOBILE D 1612.23
+   2026-11-04T13:01 TRF-0122362 MOBILE D 4779.99
+   2026-10-28T10:27 TRF-0117104 MOBILE D 1268.16
+
+### M2 Same need via bucket pattern: one document per account-month
+  statement 4000001234:2026-11 -> 2 entries in a single document read (lookup by _id)
+  bucket   stage=IDHACK   docsExamined=1       keysExamined=1       returned=1     ms=0
+
+### M3 Login lookup by phone number
+  before   stage=COLLSCAN docsExamined=5000    keysExamined=0       returned=1     ms=13
+  after    stage=IXSCAN   docsExamined=1       keysExamined=1       returned=1     ms=2
+{
+  _id: 'CUS-004521',
+  name: {
+    first: 'Fatima',
+    last: 'Adeyemi'
+  },
+  kyc: {
+    tier: 2,
+    verified: false,
+    documents: [
+      {
+        type: 'NIN',
+        number: '10000004521'
+      }
+    ]
+  }
+}
+
+### M4 Failed transactions by channel and reason, last 30 days (aggregation)
+  before   stage=COLLSCAN docsExamined=157974  keysExamined=0       returned=630   ms=297
+  after    stage=IXSCAN   docsExamined=630     keysExamined=630     returned=630   ms=14
+   MOBILE  Invalid PIN          97
+   MOBILE  Insufficient funds   94
+   MOBILE  NIBSS timeout        92
+   POS     Insufficient funds   37
+   USSD    NIBSS timeout        33
+
+### M5 Total balances by customer state ($lookup = application-side join cost)
+   Lagos      accounts=1674  total=836331085.68
+   Kaduna     accounts=656   total=327967647.42
+   Rivers     accounts=640   total=320620139.15
+   Edo        accounts=588   total=293019616.59
+   Ogun       accounts=583   total=291741576.84
+
+### M6 Polymorphic documents: business customers by sector (field exists on ~15% of docs)
+   Agro       182
+   Logistics  190
+   Retail     188
+   Tech       189
+
+### M7 $jsonSchema validation rejects malformed data
+   rejected: bvn,phone,kyc
+
+Indexes on transactions:
+   _id_ {"_id":1}
+   ix_legs_account_time {"legs.account":1,"createdAt":-1}
+   ix_failed_recent {"createdAt":-1}

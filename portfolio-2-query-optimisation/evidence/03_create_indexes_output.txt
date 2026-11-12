@@ -1,0 +1,48 @@
+SET search_path TO nairaflow;
+SET
+Timing is on.
+CREATE INDEX ix_ledger_account_time ON ledger_entry (account_id, created_at DESC, entry_id DESC);
+CREATE INDEX
+Time: 4567.437 ms (00:04.567)
+CREATE INDEX ix_customer_email_lower ON customer (lower(email));
+CREATE INDEX
+Time: 440.580 ms
+CREATE INDEX ix_txn_failed_created ON txn (created_at) WHERE status = 'FAILED';
+CREATE INDEX
+Time: 295.282 ms
+CREATE INDEX ix_ledger_time_covering ON ledger_entry (created_at)
+       INCLUDE (account_id, direction, amount, txn_id);
+CREATE INDEX
+Time: 3961.144 ms (00:03.961)
+VACUUM ANALYZE ledger_entry;
+VACUUM
+Time: 636.367 ms
+ANALYZE customer;
+ANALYZE
+Time: 797.132 ms
+ANALYZE txn;
+ANALYZE
+Time: 591.998 ms
+SELECT indexrelid::regclass AS index_name,
+       pg_size_pretty(pg_relation_size(indexrelid)) AS size
+  FROM pg_index
+ WHERE indrelid IN ('ledger_entry'::regclass, 'customer'::regclass, 'txn'::regclass)
+ ORDER BY pg_relation_size(indexrelid) DESC;
+       index_name        |  size   
+-------------------------+---------
+ ix_ledger_time_covering | 116 MB
+ uq_leg                  | 109 MB
+ ix_ledger_account_time  | 81 MB
+ ix_ledger_txn           | 53 MB
+ ledger_entry_pkey       | 45 MB
+ txn_reference_key       | 41 MB
+ txn_pkey                | 24 MB
+ customer_email_key      | 5120 kB
+ ix_customer_email_lower | 2928 kB
+ customer_phone_key      | 1856 kB
+ customer_bvn_key        | 1856 kB
+ customer_pkey           | 1328 kB
+ ix_txn_failed_created   | 1112 kB
+(13 rows)
+
+Time: 2.425 ms

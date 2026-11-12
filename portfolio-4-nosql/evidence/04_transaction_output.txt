@@ -1,0 +1,23 @@
+Balances before:
+    4000000001  590723.29
+    4000000002  717611.48
+    4000000003  485948.37
+
+1) Valid transfer
+  COMMITTED  MDB-TX-001: 4000000001 -> 4000000002  N25000
+
+2) Insufficient funds -> rollback
+  ABORTED    MDB-TX-002: Insufficient funds or inactive account 4000000001
+
+3) Unknown beneficiary -> debit of A is rolled back too
+  ABORTED    MDB-TX-003: Unknown or inactive beneficiary 4999999999
+
+4) Duplicate reference (idempotency) -> rollback
+  ABORTED    MDB-TX-001: E11000 duplicate key error collection: nairaflow.transactions index: _id_ dup key: { _id: "MDB-TX-001" }
+
+Balances after (A should be exactly 25,000 lower, B 25,000 higher):
+    4000000001  565723.29
+    4000000002  742611.48
+    4000000003  485948.37
+Transactions written: 1
+Sum of all balances (must still be 0): Decimal128('0.00')

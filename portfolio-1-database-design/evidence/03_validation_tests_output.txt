@@ -1,0 +1,175 @@
+SET search_path TO nairaflow;
+SET
+=== Row counts after seeding ===
+SELECT 'state' tbl, count(*) FROM state UNION ALL
+SELECT 'account_type', count(*) FROM account_type UNION ALL
+SELECT 'customer', count(*) FROM customer UNION ALL
+SELECT 'account', count(*) FROM account UNION ALL
+SELECT 'txn', count(*) FROM txn UNION ALL
+SELECT 'ledger_entry', count(*) FROM ledger_entry UNION ALL
+SELECT 'beneficiary', count(*) FROM beneficiary;
+     tbl      | count 
+--------------+-------
+ state        |    12
+ account_type |     3
+ customer     |    11
+ account      |    13
+ txn          |    18
+ ledger_entry |    34
+ beneficiary  |     2
+(7 rows)
+
+=== Account summary view ===
+SELECT * FROM v_account_summary ORDER BY account_number;
+ account_number |   customer_name    |          account_type           | currency |   balance    | status | state_name 
+----------------+--------------------+---------------------------------+----------+--------------+--------+------------
+ 0123456781     | Adaeze Okafor      | Tier savings account            | NGN      |    825000.00 | ACTIVE | Lagos
+ 0123456782     | Adaeze Okafor      | Business current account        | NGN      |   3700000.00 | ACTIVE | Lagos
+ 0123456783     | Babatunde Adeyemi  | Tier savings account            | NGN      |    340000.00 | ACTIVE | Oyo
+ 0123456784     | Chinedu Eze        | Tier savings account            | NGN      |     50000.00 | ACTIVE | Enugu
+ 0123456785     | Fatima Bello       | Tier savings account            | NGN      |   1359965.00 | ACTIVE | Kano
+ 0123456786     | Emeka Nwosu        | Business current account        | NGN      |  10150000.00 | ACTIVE | Anambra
+ 0123456787     | Halima Yusuf       | Tier savings account            | NGN      |    682000.00 | ACTIVE | Kaduna
+ 0123456788     | Oluwaseun Balogun  | Tier savings account            | NGN      |     18500.00 | ACTIVE | Ogun
+ 0123456789     | Ibrahim Musa       | Tier savings account            | NGN      |    275000.00 | ACTIVE | FCT Abuja
+ 0123456790     | Ngozi Obi          | Tier savings account            | NGN      |   2228000.00 | ACTIVE | Rivers
+ 0123456791     | Osagie Igbinedion  | Business current account        | NGN      |         0.00 | ACTIVE | Edo
+ 9000000001     | NairaFlow Treasury | Internal general-ledger account | NGN      | -19628500.00 | ACTIVE | Lagos
+ 9000000002     | NairaFlow Treasury | Internal general-ledger account | NGN      |        35.00 | ACTIVE | Lagos
+(13 rows)
+
+=== Ledger is balanced: sum of debits = sum of credits for every txn ===
+SELECT txn_id,
+       SUM(amount) FILTER (WHERE direction='D') AS debits,
+       SUM(amount) FILTER (WHERE direction='C') AS credits
+  FROM ledger_entry GROUP BY txn_id ORDER BY txn_id LIMIT 5;
+ txn_id |   debits   |  credits   
+--------+------------+------------
+      1 |  850000.00 |  850000.00
+      2 | 4200000.00 | 4200000.00
+      3 |  320000.00 |  320000.00
+      4 |   45000.00 |   45000.00
+      5 | 1250000.00 | 1250000.00
+(5 rows)
+
+SELECT count(*) AS unbalanced_txns FROM (
+  SELECT txn_id FROM ledger_entry GROUP BY txn_id
+  HAVING SUM(CASE direction WHEN 'D' THEN amount ELSE -amount END) <> 0) x;
+ unbalanced_txns 
+-----------------
+               0
+(1 row)
+
+=== Sum of all balances is zero (money is only moved, never created) ===
+SELECT SUM(balance) AS total_of_all_balances FROM account;
+ total_of_all_balances 
+-----------------------
+                  0.00
+(1 row)
+
+--- T1 PRIMARY KEY / UNIQUE: duplicate BVN (expect uniqueness violation)
+INSERT INTO customer(bvn, first_name, last_name, email, phone, date_of_birth, state_code)
+VALUES ('22145678901','Dup','Bvn','dup@example.ng','+2348099999999','1990-01-01','LA');
+psql:/tmp/03_validation_tests.sql:36: ERROR:  duplicate key value violates unique constraint "customer_bvn_key"
+DETAIL:  Key (bvn)=(22145678901) already exists.
+--- T2 CHECK: phone not in +234 format
+INSERT INTO customer(bvn, first_name, last_name, email, phone, date_of_birth, state_code)
+VALUES ('22199999999','Bad','Phone','bad.phone@example.ng','08031234567','1990-01-01','LA');
+psql:/tmp/03_validation_tests.sql:40: ERROR:  new row for relation "customer" violates check constraint "customer_phone_check"
+DETAIL:  Failing row contains (13, 22199999999, Bad, Phone, bad.phone@example.ng, 08031234567, 1990-01-01, 1, LA, 2026-11-11 22:53:58.274419+00).
+--- T3 CHECK: customer under 18
+INSERT INTO customer(bvn, first_name, last_name, email, phone, date_of_birth, state_code)
+VALUES ('22199999998','Too','Young','young@example.ng','+2348099999998', CURRENT_DATE - 365*10,'LA');
+psql:/tmp/03_validation_tests.sql:44: ERROR:  new row for relation "customer" violates check constraint "customer_date_of_birth_check"
+DETAIL:  Failing row contains (14, 22199999998, Too, Young, young@example.ng, +2348099999998, 2016-11-13, 1, LA, 2026-11-11 22:53:58.275327+00).
+--- T4 FOREIGN KEY: unknown state code
+INSERT INTO customer(bvn, first_name, last_name, email, phone, date_of_birth, state_code)
+VALUES ('22199999997','No','State','nostate@example.ng','+2348099999997','1990-01-01','ZZ');
+psql:/tmp/03_validation_tests.sql:48: ERROR:  insert or update on table "customer" violates foreign key constraint "customer_state_code_fkey"
+DETAIL:  Key (state_code)=(ZZ) is not present in table "state".
+--- T5 CHECK chk_no_overdraft: customer balance below zero
+UPDATE account SET balance = -1 WHERE account_number = '0123456788';
+psql:/tmp/03_validation_tests.sql:51: ERROR:  new row for relation "account" violates check constraint "chk_no_overdraft"
+DETAIL:  Failing row contains (10, 0123456788, 8, SAVINGS, NGN, -1.00, ACTIVE, 2026-11-11 22:53:54.529803+00).
+--- T6 CHECK: negative transaction amount
+INSERT INTO txn(txn_type, amount, channel) VALUES ('TRANSFER', -500, 'WEB');
+psql:/tmp/03_validation_tests.sql:54: ERROR:  new row for relation "txn" violates check constraint "txn_amount_check"
+DETAIL:  Failing row contains (19, e5c16e67-b332-4120-a21f-535fbd4dad47, TRANSFER, PENDING, -500.00, WEB, null, null, 2026-11-11 22:53:58.27968+00, null).
+--- T7 CHECK chk_reversal_link: REVERSAL without the txn it reverses
+INSERT INTO txn(txn_type, amount, channel) VALUES ('REVERSAL', 500, 'WEB');
+psql:/tmp/03_validation_tests.sql:57: ERROR:  new row for relation "txn" violates check constraint "chk_reversal_link"
+DETAIL:  Failing row contains (20, e66551b9-25c2-4a40-8918-aaf3f16b4c83, REVERSAL, PENDING, 500.00, WEB, null, null, 2026-11-11 22:53:58.280762+00, null).
+--- T8 Deferred double-entry trigger: one-legged posting rejected at COMMIT
+BEGIN;
+BEGIN
+INSERT INTO txn(txn_type, status, amount, channel) VALUES ('DEPOSIT','COMPLETED',1000,'BRANCH');
+INSERT 0 1
+INSERT INTO ledger_entry(txn_id, account_id, direction, amount, balance_after)
+SELECT max(txn_id), 3, 'C', 1000, 0 FROM txn;
+INSERT 0 1
+COMMIT;
+psql:/tmp/03_validation_tests.sql:64: ERROR:  Unbalanced transaction 21: debits 0 <> credits 1000.00
+CONTEXT:  PL/pgSQL function trg_check_balanced_txn() line 9 at RAISE
+--- T9 FK ON DELETE RESTRICT: cannot delete a customer who owns accounts
+DELETE FROM customer WHERE bvn = '22145678901';
+psql:/tmp/03_validation_tests.sql:67: ERROR:  update or delete on table "customer" violates foreign key constraint "account_customer_id_fkey" on table "account"
+DETAIL:  Key (customer_id)=(2) is still referenced from table "account".
+--- T10 Business rule in transfer_funds(): insufficient funds
+SELECT transfer_funds('0123456788','0123456781', 1000000.00);
+psql:/tmp/03_validation_tests.sql:70: ERROR:  Insufficient funds: balance 18500.00, requested 1000000.00
+CONTEXT:  PL/pgSQL function transfer_funds(character,character,numeric,character varying,character varying,uuid,character varying) line 35 at RAISE
+--- T11 Business rule: frozen account cannot transact (and freeze is audited)
+UPDATE account SET status = 'FROZEN' WHERE account_number = '0123456789';
+UPDATE 1
+SELECT transfer_funds('0123456789','0123456781', 100.00);
+psql:/tmp/03_validation_tests.sql:74: ERROR:  Account not active (from=FROZEN, to=ACTIVE)
+CONTEXT:  PL/pgSQL function transfer_funds(character,character,numeric,character varying,character varying,uuid,character varying) line 32 at RAISE
+SELECT audit_id, table_name, record_id, action,
+       old_data->>'status' AS old_status, new_data->>'status' AS new_status
+  FROM audit_log ORDER BY audit_id DESC LIMIT 1;
+ audit_id | table_name | record_id | action | old_status | new_status 
+----------+------------+-----------+--------+------------+------------
+        1 | account    |        11 | UPDATE | ACTIVE     | FROZEN
+(1 row)
+
+UPDATE account SET status = 'ACTIVE' WHERE account_number = '0123456789';
+UPDATE 1
+--- T12 Reversal of a completed transfer
+SELECT txn_id, txn_type, status, amount FROM txn WHERE narration = 'Airtime refund';
+ txn_id | txn_type |  status   | amount  
+--------+----------+-----------+---------
+     13 | TRANSFER | COMPLETED | 5000.00
+(1 row)
+
+SELECT reverse_transaction((SELECT txn_id FROM txn WHERE narration='Airtime refund'), 'Customer dispute #4471');
+ reverse_transaction 
+---------------------
+                  22
+(1 row)
+
+SELECT txn_id, txn_type, status, amount, reverses_txn_id FROM txn
+ WHERE narration IN ('Airtime refund','Customer dispute #4471') ORDER BY txn_id;
+ txn_id | txn_type |  status   | amount  | reverses_txn_id 
+--------+----------+-----------+---------+-----------------
+     13 | TRANSFER | REVERSED  | 5000.00 |                
+     22 | REVERSAL | COMPLETED | 5000.00 |              13
+(2 rows)
+
+SELECT account_number, balance FROM account WHERE account_number IN ('0123456783','0123456784');
+ account_number |  balance  
+----------------+-----------
+ 0123456783     | 345000.00
+ 0123456784     |  45000.00
+(2 rows)
+
+--- T13 Reversing the same transaction twice is rejected
+SELECT reverse_transaction((SELECT txn_id FROM txn WHERE narration='Airtime refund'), 'again');
+psql:/tmp/03_validation_tests.sql:88: ERROR:  Only COMPLETED transactions can be reversed (status=REVERSED)
+CONTEXT:  PL/pgSQL function reverse_transaction(bigint,character varying) line 10 at RAISE
+=== Final integrity check ===
+SELECT SUM(balance) AS total_of_all_balances FROM account;
+ total_of_all_balances 
+-----------------------
+                  0.00
+(1 row)
+

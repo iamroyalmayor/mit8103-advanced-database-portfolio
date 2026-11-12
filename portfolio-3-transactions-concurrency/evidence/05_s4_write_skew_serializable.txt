@@ -1,0 +1,69 @@
+===================================================================
+S4 WRITE SKEW at SERIALIZABLE: combined balance must stay >= 4164500.00; each session debits 400,000 from a different account
+===================================================================
+------------------------- Session A -------------------------------
+[A] SET search_path TO nairaflow;
+[A] SET
+[A] BEGIN ISOLATION LEVEL SERIALIZABLE;
+[A] BEGIN
+[A] SELECT ts('A: check combined balance');
+[A]                    ts                    
+[A] -----------------------------------------
+[A]  22:59:26.170  A: check combined balance
+[A] (1 row)
+[A] 
+[A] SELECT sum(balance) AS combined FROM account WHERE customer_id = 2 
+[A] A sees combined balance 4664500.00  floor 4164500.00
+[A] SELECT ts('A: rule OK -> debit 400,000 from 0123456781'), pg_sleep(3)
+[A]  WHERE 4664500.00 - 400000 >= 4164500.00;
+[A]                             ts                             | pg_sleep 
+[A] -----------------------------------------------------------+----------
+[A]  22:59:26.174  A: rule OK -> debit 400,000 from 0123456781 | 
+[A] (1 row)
+[A] 
+[A] UPDATE account SET balance = balance - 400000
+[A]  WHERE account_number = '0123456781' AND 4664500.00 - 400000 >= 4164500.00;
+[A] psql:/tmp/s4_write_skew_serializable_A.sql:11: ERROR:  could not serialize access due to read/write dependencies among transactions
+[A] DETAIL:  Reason code: Canceled on identification as a pivot, during write.
+[A] HINT:  The transaction might succeed if retried.
+[A] COMMIT;
+[A] ROLLBACK
+[A] SELECT ts('A: end of transaction');
+[A]                  ts                  
+[A] -------------------------------------
+[A]  22:59:29.179  A: end of transaction
+[A] (1 row)
+[A] 
+------------------------- Session B -------------------------------
+[B] SET search_path TO nairaflow;
+[B] SET
+[B] BEGIN ISOLATION LEVEL SERIALIZABLE;
+[B] BEGIN
+[B] SELECT ts('B: check combined balance');
+[B]                    ts                    
+[B] -----------------------------------------
+[B]  22:59:27.179  B: check combined balance
+[B] (1 row)
+[B] 
+[B] SELECT sum(balance) AS combined FROM account WHERE customer_id = 2 
+[B] B sees combined balance 4664500.00  floor 4164500.00
+[B] SELECT ts('B: rule OK -> debit 400,000 from 0123456782'), pg_sleep(1)
+[B]  WHERE 4664500.00 - 400000 >= 4164500.00;
+[B]                             ts                             | pg_sleep 
+[B] -----------------------------------------------------------+----------
+[B]  22:59:27.183  B: rule OK -> debit 400,000 from 0123456782 | 
+[B] (1 row)
+[B] 
+[B] UPDATE account SET balance = balance - 400000
+[B]  WHERE account_number = '0123456782' AND 4664500.00 - 400000 >= 4164500.00;
+[B] UPDATE 1
+[B] COMMIT;
+[B] COMMIT
+[B] SELECT ts('B: end of transaction');
+[B]                  ts                  
+[B] -------------------------------------
+[B]  22:59:28.189  B: end of transaction
+[B] (1 row)
+[B] 
+
+RESULT: combined before=4664500.00  after=4264500.00  floor=4164500.00  -> rule preserved

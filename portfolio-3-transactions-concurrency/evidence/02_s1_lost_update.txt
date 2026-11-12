@@ -1,0 +1,69 @@
+===================================================================
+S1 LOST UPDATE at READ COMMITTED (A debits 50,000, B debits 30,000)
+===================================================================
+------------------------- Session A -------------------------------
+[A] SET search_path TO nairaflow;
+[A] SET
+[A] BEGIN;
+[A] BEGIN
+[A] SELECT ts('A: read balance');
+[A]               ts               
+[A] -------------------------------
+[A]  22:58:50.559  A: read balance
+[A] (1 row)
+[A] 
+[A] SELECT balance AS bal FROM account WHERE account_number = '0123456787' 
+[A] A sees balance 682000.00
+[A] SELECT ts('A: app thinking (3s)...'), pg_sleep(3);
+[A]                   ts                   | pg_sleep 
+[A] ---------------------------------------+----------
+[A]  22:58:50.562  A: app thinking (3s)... | 
+[A] (1 row)
+[A] 
+[A] UPDATE account SET balance = 682000.00 - 50000 WHERE account_number = '0123456787';
+[A] UPDATE 1
+[A] SELECT ts('A: wrote balance = old - 50000');
+[A]                       ts                      
+[A] ----------------------------------------------
+[A]  22:58:53.568  A: wrote balance = old - 50000
+[A] (1 row)
+[A] 
+[A] COMMIT;
+[A] COMMIT
+[A] SELECT ts('A: committed');
+[A]              ts             
+[A] ----------------------------
+[A]  22:58:53.571  A: committed
+[A] (1 row)
+[A] 
+------------------------- Session B -------------------------------
+[B] SET search_path TO nairaflow;
+[B] SET
+[B] BEGIN;
+[B] BEGIN
+[B] SELECT ts('B: read balance');
+[B]               ts               
+[B] -------------------------------
+[B]  22:58:51.631  B: read balance
+[B] (1 row)
+[B] 
+[B] SELECT balance AS bal FROM account WHERE account_number = '0123456787' 
+[B] B sees balance 682000.00
+[B] UPDATE account SET balance = 682000.00 - 30000 WHERE account_number = '0123456787';
+[B] UPDATE 1
+[B] SELECT ts('B: wrote balance = old - 30000');
+[B]                       ts                      
+[B] ----------------------------------------------
+[B]  22:58:51.636  B: wrote balance = old - 30000
+[B] (1 row)
+[B] 
+[B] COMMIT;
+[B] COMMIT
+[B] SELECT ts('B: committed');
+[B]              ts             
+[B] ----------------------------
+[B]  22:58:51.639  B: committed
+[B] (1 row)
+[B] 
+
+RESULT: start=682000.00  final=632000.00  expected=602000.00  -> B's 30,000 debit was LOST

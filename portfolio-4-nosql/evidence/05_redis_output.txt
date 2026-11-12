@@ -1,0 +1,66 @@
+> redis-cli FLUSHALL
+OK
+
+### K1 Mobile-app session token with automatic expiry (TTL)
+> redis-cli SET session:9f3c2a1b {"customerId":"CUS-000002","device":"dev-2","kyc":3} EX 900
+OK
+> redis-cli GET session:9f3c2a1b
+{"customerId":"CUS-000002","device":"dev-2","kyc":3}
+> redis-cli TTL session:9f3c2a1b
+898
+
+### K2 OTP brute-force protection: max 3 attempts per phone per 5 minutes (INCR + EXPIRE)
+  attempt 1 -> allowed
+  attempt 2 -> allowed
+  attempt 3 -> allowed
+  attempt 4 -> BLOCKED (locked for 296s)
+
+### K3 Idempotency key: SET NX guarantees a retried transfer is processed once
+> redis-cli SET idem:a1b2c3d4-0000-4000-8000-000000008103 PROCESSING NX EX 86400
+OK
+> redis-cli SET idem:a1b2c3d4-0000-4000-8000-000000008103 PROCESSING NX EX 86400
+
+  (nil on the 2nd call = duplicate request detected, return the stored result instead)
+
+### K4 Read-through balance cache (hash) - invalidated after each posting
+> redis-cli HSET acct:0123456781 balance 964500.00 currency NGN status ACTIVE
+3
+> redis-cli EXPIRE acct:0123456781 60
+1
+> redis-cli HGETALL acct:0123456781
+balance
+964500.00
+currency
+NGN
+status
+ACTIVE
+> redis-cli DEL acct:0123456781
+1
+
+### K5 Real-time 'top senders today' leaderboard (sorted set)
+> redis-cli ZINCRBY senders:2026-11-11 25000 0123456781
+25000
+> redis-cli ZINCRBY senders:2026-11-11 150000 0123456786
+150000
+> redis-cli ZINCRBY senders:2026-11-11 72000 0123456790
+72000
+> redis-cli ZINCRBY senders:2026-11-11 40000 0123456781
+65000
+> redis-cli ZREVRANGE senders:2026-11-11 0 2 WITHSCORES
+0123456786
+150000
+0123456790
+72000
+0123456781
+65000
+
+### K6 Fraud velocity counter: distinct senders into an account per hour (HyperLogLog)
+> redis-cli PFCOUNT inflow:3000050001:2026111022
+120
+  ~12 KB per key regardless of sender count; approximate (0.81% std error) but O(1)
+
+### Memory and key overview
+> redis-cli DBSIZE
+5
+used_memory_human:1.27M
+maxmemory_policy:noeviction
