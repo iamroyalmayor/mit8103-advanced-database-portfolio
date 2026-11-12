@@ -29,7 +29,7 @@
 | Email | i.sulaimon9160@miva.edu.ng |
 | Matric No. | 2026/A/MIT/0472 |
 | Student ID | 301869160 |
-| Repository | [iamroyalmayor/mit8103-advanced-database-portfolio](https://github.com/iamroyalmayor/mit8103-advanced-database-portfolio) (private; assessor added as collaborator) |
+| Repository | [iamroyalmayor/mit8103-advanced-database-portfolio](https://github.com/iamroyalmayor/mit8103-advanced-database-portfolio)  |
 
 ## Case study
 
