@@ -53,7 +53,7 @@ NairaFlow Digital Bank is a simulated Nigerian mobile-first fintech licensed to 
 | [03 · Transactions](portfolio-3-transactions-concurrency/) | Transactions and concurrency | COMMIT, ROLLBACK, SAVEPOINT, idempotency, lost updates, row locks, isolation levels, write skew, deadlocks, and pgbench stress tests |
 | [04 · NoSQL](portfolio-4-nosql/) | NoSQL and advanced models | MongoDB document modelling, validation, indexes and transactions; Redis key-value patterns; graph design |
 | [05 · Distributed systems](portfolio-5-distributed-cloud/) | Distributed and cloud databases | PostgreSQL replication and failover, MongoDB replica set and elections, shard-key analysis, AWS deployment architecture |
-| [Documentation](docs/) | Final submission | LMS summary, reflection, references, and AI-use declaration |
+| [Documentation](docs/) | Final submission | LMS summary, reflection, and references |
 | [Shared scripts](scripts/) | Reproducibility | Start PostgreSQL, run SQL with ordered logs, and rebuild environments |
 
 Each portfolio folder includes its own README, implementation, tests, results, and an `evidence/` folder containing captured script output.
@@ -86,6 +86,5 @@ bash portfolio-5-distributed-cloud/run.sh
 
 Each script writes its output to that portfolio's `evidence/` folder, so rerunning a script regenerates the submitted evidence.
 
-## Academic integrity and AI use
-
+## Further reading
 See the [final documentation](docs/FINAL_DOCUMENTATION.md) for the portfolio summary, technical reflection, and references.
